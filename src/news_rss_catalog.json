@@ -1,0 +1,14 @@
+{
+  "world_major": [
+    "http://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "https://www.reutersagency.com/feed/?best-topics=world&post_type=best"
+  ],
+  "business_tech": [
+    "https://feeds.reuters.com/reuters/businessNews",
+    "https://feeds.arstechnica.com/arstechnica/index",
+    "https://www.theverge.com/rss/index.xml",
+    "https://www.cnbc.com/id/10001147/device/rss/rss.html"
+  ]
+}
