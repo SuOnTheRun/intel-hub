@@ -1,5 +1,4 @@
-import os
-import time
+import os, time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import pandas as pd
@@ -8,16 +7,32 @@ import feedparser
 import yfinance as yf
 from textblob import TextBlob
 
+# Optional reddit
 try:
     import praw
 except Exception:
     praw = None
 
-# ---------------------- Polygon (optional) + Yahoo Finance ----------------------
+# Optional Streamlit cache decorator (no-op if not running under Streamlit)
+try:
+    import streamlit as st
+    cache = st.cache_data
+except Exception:  # pragma: no cover
+    def cache(*args, **kwargs):
+        def wrap(fn): return fn
+        return wrap
+
+# ---------------------- Helpers ----------------------
+
+def _utcify(series):
+    return pd.to_datetime(series, errors="coerce", utc=True)
+
+# ---------------------- Polygon + Yahoo (markets) ----------------------
 
 def _polygon_key() -> str | None:
     return os.getenv("POLYGON_ACCESS_KEY") or os.getenv("POLYGON_API_KEY")
 
+@cache(ttl=300)
 def _polygon_agg_for_ticker(ticker: str) -> Dict[str, Any] | None:
     api_key = _polygon_key()
     if not api_key:
@@ -34,8 +49,7 @@ def _polygon_agg_for_ticker(ticker: str) -> Dict[str, Any] | None:
         results = (r.json() or {}).get("results") or []
         if not results:
             return None
-        last = results[-1]
-        prev = results[-2] if len(results) >= 2 else None
+        last = results[-1]; prev = results[-2] if len(results) >= 2 else None
         out = {
             "ticker": ticker,
             "price": float(last.get("c", 0.0)),
@@ -50,20 +64,17 @@ def _polygon_agg_for_ticker(ticker: str) -> Dict[str, Any] | None:
     except Exception:
         return None
 
+@cache(ttl=300)
 def _yf_snapshot_for_ticker(ticker: str) -> Dict[str, Any] | None:
     try:
         info = yf.Ticker(ticker)
         hist = info.history(period="5d", interval="1d")
-        last = hist.tail(1)
-        if last.empty:
+        if hist.empty:
             return None
-        price = float(last["Close"].iloc[0])
-        change = 0.0
-        if len(hist) >= 2:
-            prev_close = hist["Close"].iloc[-2]
-            if prev_close:
-                change = float((price - prev_close) / prev_close * 100.0)
-        volume = int(last["Volume"].iloc[0]) if not pd.isna(last["Volume"].iloc[0]) else None
+        price = float(hist["Close"].iloc[-1])
+        prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price
+        change = ((price - prev_close) / prev_close) * 100.0 if prev_close else 0.0
+        volume = int(hist["Volume"].iloc[-1]) if not pd.isna(hist["Volume"].iloc[-1]) else None
         return {"ticker": ticker, "price": price, "change_1d": change, "volume": volume, "source": "yfinance"}
     except Exception:
         return None
@@ -77,7 +88,7 @@ def fetch_market_snapshot(tickers: List[str]) -> pd.DataFrame:
             row = _yf_snapshot_for_ticker(t)
         if row:
             rows.append(row)
-        time.sleep(0.15)
+        time.sleep(0.1)
     return pd.DataFrame(rows).sort_values("ticker") if rows else pd.DataFrame(columns=["ticker","price","change_1d","volume","source"])
 
 # ---------------------- News: RSS + NewsAPI ----------------------
@@ -87,8 +98,8 @@ def _rss_sources(bundle: str) -> List[str]:
         return [
             "https://feeds.reuters.com/reuters/businessNews",
             "https://feeds.arstechnica.com/arstechnica/index",
-            "https://www.theverge.com/rss/index.xml",
             "https://www.cnbc.com/id/10001147/device/rss/rss.html",
+            "https://www.ft.com/rss/home/asia",   # FT Asia
         ]
     return [
         "http://feeds.bbci.co.uk/news/world/rss.xml",
@@ -97,12 +108,12 @@ def _rss_sources(bundle: str) -> List[str]:
         "https://www.reutersagency.com/feed/?best-topics=world&post_type=best",
     ]
 
+@cache(ttl=300)
 def fetch_rss_bundle(bundle: str) -> pd.DataFrame:
-    urls = _rss_sources(bundle)
     rows = []
-    for url in urls:
+    for url in _rss_sources(bundle):
         parsed = feedparser.parse(url)
-        for e in parsed.entries[:50]:
+        for e in parsed.entries[:60]:
             rows.append({
                 "source": parsed.feed.get("title", ""),
                 "title": e.get("title", ""),
@@ -113,26 +124,29 @@ def fetch_rss_bundle(bundle: str) -> pd.DataFrame:
             })
     df = pd.DataFrame(rows)
     if not df.empty:
-        # ✅ force UTC tz-aware datetimes
-        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce", utc=True)
+        df["published_ts"] = _utcify(df["published"])
         df = df.sort_values("published_ts", ascending=False)
     return df
 
-def fetch_newsapi_bundle(queries: List[str], language: str = "en") -> pd.DataFrame:
+def _expanded_queries(region_term: str, topics: List[str], extra_keywords: List[str]) -> List[str]:
+    base = [region_term] + topics
+    for k in extra_keywords:
+        base.append(f"{region_term} {k}")
+    return list(dict.fromkeys([q for q in base if q]))
+
+@cache(ttl=300)
+def fetch_newsapi_bundle(query_terms: List[str], language: str = "en") -> pd.DataFrame:
     api_key = os.getenv("NEWSAPI_KEY")
     if not api_key:
         return pd.DataFrame(columns=["source","title","summary","link","published","origin"])
     rows = []
-    for q in queries:
-        url = (
-            "https://newsapi.org/v2/everything"
-            f"?q={requests.utils.quote(q)}&language={language}&sortBy=publishedAt&pageSize=50"
-        )
+    for q in query_terms:
+        url = ("https://newsapi.org/v2/everything"
+               f"?q={requests.utils.quote(q)}&language={language}&sortBy=publishedAt&pageSize=100")
         try:
             r = requests.get(url, headers={"X-Api-Key": api_key}, timeout=25)
             r.raise_for_status()
-            js = r.json()
-            for a in js.get("articles") or []:
+            for a in (r.json().get("articles") or []):
                 rows.append({
                     "source": (a.get("source") or {}).get("name", ""),
                     "title": a.get("title", ""),
@@ -142,38 +156,30 @@ def fetch_newsapi_bundle(queries: List[str], language: str = "en") -> pd.DataFra
                     "origin": "newsapi",
                     "query": q,
                 })
-            time.sleep(0.2)
+            time.sleep(0.1)
         except Exception:
             continue
     df = pd.DataFrame(rows)
     if not df.empty:
-        # ✅ force UTC tz-aware datetimes
-        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce", utc=True)
-        df = df.sort_values("published_ts", ascending=False)
+        df["published_ts"] = _utcify(df["published"])
+        df = df.drop_duplicates(subset=["link"]).sort_values("published_ts", ascending=False)
     return df
-
 
 def merge_news_and_dedupe(rss_df: pd.DataFrame, newsapi_df: pd.DataFrame) -> pd.DataFrame:
     if (rss_df is None or rss_df.empty) and (newsapi_df is None or newsapi_df.empty):
         return pd.DataFrame(columns=["source","published_ts","title","sentiment","link","origin"])
     df = pd.concat([rss_df, newsapi_df], ignore_index=True)
-
-    # De-dup on link/title
-    if "link" in df.columns:
-        df = df.drop_duplicates(subset=["link"]).copy()
-    elif "title" in df.columns:
-        df = df.drop_duplicates(subset=["title"]).copy()
-
-    # ✅ normalize published_ts to UTC (tz-aware) regardless of input
-    if "published_ts" in df.columns:
-        df["published_ts"] = pd.to_datetime(df["published_ts"], errors="coerce", utc=True)
+    df = (df.drop_duplicates(subset=["link"]) if "link" in df.columns else
+          df.drop_duplicates(subset=["title"]))
+    if "published_ts" not in df.columns:
+        df["published_ts"] = _utcify(df.get("published"))
     else:
-        df["published_ts"] = pd.to_datetime(df.get("published"), errors="coerce", utc=True)
-
+        df["published_ts"] = _utcify(df["published_ts"])
     return df.sort_values("published_ts", ascending=False)
 
 # ---------------------- Google Trends ----------------------
 
+@cache(ttl=300)
 def fetch_google_trends(topics: List[str]) -> pd.DataFrame:
     try:
         from pytrends.request import TrendReq
@@ -185,17 +191,17 @@ def fetch_google_trends(topics: List[str]) -> pd.DataFrame:
         try:
             pytrends.build_payload([t], timeframe="now 7-d", geo="")
             df = pytrends.interest_over_time()
-            if df.empty:
-                continue
+            if df.empty: continue
             last = df.tail(1)[t].iloc[0]
             rows.append({"topic": t, "value": int(last)})
-            time.sleep(0.1)
+            time.sleep(0.05)
         except Exception:
             continue
     return pd.DataFrame(rows)
 
-# ---------------------- OpenSky (positions + optional tracks) ----------------------
+# ---------------------- OpenSky ----------------------
 
+@cache(ttl=120)
 def fetch_opensky_air_traffic(bbox: str = None, allow_global_fallback: bool = True) -> pd.DataFrame:
     base = "https://opensky-network.org/api/states/all"
     auth = None
@@ -207,7 +213,7 @@ def fetch_opensky_air_traffic(bbox: str = None, allow_global_fallback: bool = Tr
         params = {"lamin": min_lat, "lomin": min_lon, "lamax": max_lat, "lomax": max_lon}
     r = requests.get(base, params=params, auth=auth, timeout=20)
     if r.status_code != 200 and allow_global_fallback:
-        r = requests.get(base, timeout=20)  # global sample (real, may be rate-limited)
+        r = requests.get(base, timeout=20)  # real global fallback
     r.raise_for_status()
     states = (r.json() or {}).get("states", []) or []
     cols = [
@@ -224,31 +230,27 @@ def fetch_opensky_air_traffic(bbox: str = None, allow_global_fallback: bool = Tr
         df = df.dropna(subset=["latitude","longitude"])
     return df
 
-
+@cache(ttl=120)
 def fetch_opensky_tracks_for_icao24(icao24: str) -> pd.DataFrame:
-    """Fetch recent track (last ~1h) for a given aircraft if authenticated; anonymous may fail."""
     if not (os.getenv("OPENSKY_USERNAME") and os.getenv("OPENSKY_PASSWORD")):
         return pd.DataFrame(columns=["time","lat","lon","baro_altitude"])
-    end = int(datetime.utcnow().timestamp())
-    start = end - 3600
     base = "https://opensky-network.org/api/tracks/all"
     auth = (os.getenv("OPENSKY_USERNAME"), os.getenv("OPENSKY_PASSWORD"))
-    r = requests.get(base, params={"icao24": icao24, "time": end}, auth=auth, timeout=20)
+    now = int(datetime.utcnow().timestamp())
+    r = requests.get(base, params={"icao24": icao24, "time": now}, auth=auth, timeout=20)
     if r.status_code != 200:
         return pd.DataFrame(columns=["time","lat","lon","baro_altitude"])
-    data = r.json() or {}
-    path = data.get("path") or []
+    path = (r.json() or {}).get("path") or []
     rows = [{"time": p.get("time"), "lat": p.get("latitude"), "lon": p.get("longitude"), "baro_altitude": p.get("baro_altitude")} for p in path]
     return pd.DataFrame(rows)
 
-# ---------------------- Reddit (optional) ----------------------
+# ---------------------- Reddit ----------------------
 
+@cache(ttl=300)
 def fetch_reddit_posts_if_configured(queries: List[str]) -> pd.DataFrame:
     if not praw:
         return pd.DataFrame(columns=["subreddit","title","score","url","created_utc"])
-    cid = os.getenv("REDDIT_CLIENT_ID")
-    csec = os.getenv("REDDIT_CLIENT_SECRET")
-    uag = os.getenv("REDDIT_USER_AGENT")
+    cid = os.getenv("REDDIT_CLIENT_ID"); csec = os.getenv("REDDIT_CLIENT_SECRET"); uag = os.getenv("REDDIT_USER_AGENT")
     if not (cid and csec and uag):
         return pd.DataFrame(columns=["subreddit","title","score","url","created_utc"])
     reddit = praw.Reddit(client_id=cid, client_secret=csec, user_agent=uag, check_for_async=False)
@@ -256,33 +258,24 @@ def fetch_reddit_posts_if_configured(queries: List[str]) -> pd.DataFrame:
     for q in queries:
         for post in reddit.subreddit("all").search(q, sort="new", time_filter="day", limit=50):
             rows.append({
-                "query": q,
-                "subreddit": str(post.subreddit),
-                "title": post.title,
-                "score": int(post.score),
-                "url": f"https://reddit.com{post.permalink}",
-                "created_utc": pd.to_datetime(post.created_utc, unit="s")
+                "query": q, "subreddit": str(post.subreddit), "title": post.title, "score": int(post.score),
+                "url": f"https://reddit.com{post.permalink}", "created_utc": pd.to_datetime(post.created_utc, unit="s")
             })
-        time.sleep(0.1)
+        time.sleep(0.05)
     return pd.DataFrame(rows)
 
-# ---------------------- GDELT (no key) ----------------------
+# ---------------------- GDELT (doc API) ----------------------
 
+@cache(ttl=300)
 def fetch_gdelt_events(queries: List[str]) -> pd.DataFrame:
-    """
-    Fetches recent GDELT 'Events' 2.1 API for given queries; lightweight and real.
-    """
     rows = []
-    for q in queries[:5]:
-        url = (
-            "https://api.gdeltproject.org/api/v2/doc/doc"
-            f"?query={requests.utils.quote(q)}&mode=ArtList&format=json&maxrecords=50&timespan=72hours"
-        )
+    for q in queries[:6]:
+        url = ("https://api.gdeltproject.org/api/v2/doc/doc"
+               f"?query={requests.utils.quote(q)}&mode=ArtList&format=json&maxrecords=75&timespan=72hours")
         try:
             r = requests.get(url, timeout=25)
             r.raise_for_status()
-            arts = (r.json() or {}).get("articles") or []
-            for a in arts:
+            for a in (r.json() or {}).get("articles", []) or []:
                 rows.append({
                     "source": a.get("sourceCommonName", ""),
                     "title": a.get("title", ""),
@@ -293,11 +286,11 @@ def fetch_gdelt_events(queries: List[str]) -> pd.DataFrame:
                     "location": a.get("location", ""),
                     "theme": a.get("themes", ""),
                 })
-            time.sleep(0.15)
+            time.sleep(0.05)
         except Exception:
             continue
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce", utc=True)
+        df["published_ts"] = _utcify(df["published"])
         df = df.sort_values("published_ts", ascending=False)
     return df
