@@ -9,23 +9,25 @@ def render_global_air_map(df: pd.DataFrame, center=None, zoom=4):
     lat = float(df["latitude"].mean()); lon = float(df["longitude"].mean())
     if center: lat, lon = center
     view_state = pdk.ViewState(latitude=lat, longitude=lon, zoom=zoom, pitch=30)
+    pts = df.rename(columns={"latitude":"lat","longitude":"lon"})
+
+    heat = pdk.Layer(
+        "HeatmapLayer",
+        data=pts,
+        get_position='[lon, lat]',
+        aggregation='"SUM"',
+        get_weight="velocity",
+        radiusPixels=40,
+    )
     scatter = pdk.Layer(
         "ScatterplotLayer",
-        data=df.rename(columns={"latitude":"lat","longitude":"lon"}),
+        data=pts,
         get_position='[lon, lat]',
         get_radius=20000,
         pickable=True,
         auto_highlight=True,
     )
-    text = pdk.Layer(
-        "TextLayer",
-        data=df.rename(columns={"latitude":"lat","longitude":"lon"}),
-        get_position='[lon, lat]',
-        get_text="callsign",
-        get_size=12,
-        get_alignment_baseline="'top'",
-    )
-    r = pdk.Deck(layers=[scatter, text], initial_view_state=view_state, map_style="mapbox://styles/mapbox/dark-v11")
+    r = pdk.Deck(layers=[heat, scatter], initial_view_state=view_state, map_style="mapbox://styles/mapbox/dark-v11")
     st.pydeck_chart(r, use_container_width=True)
 
 def render_tracks_map(track_df: pd.DataFrame):
