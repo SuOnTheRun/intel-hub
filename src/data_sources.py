@@ -98,10 +98,11 @@ def _rss_sources(bundle: str) -> List[str]:
     ]
 
 def fetch_rss_bundle(bundle: str) -> pd.DataFrame:
+    urls = _rss_sources(bundle)
     rows = []
-    for url in _rss_sources(bundle):
+    for url in urls:
         parsed = feedparser.parse(url)
-        for e in parsed.entries[:60]:
+        for e in parsed.entries[:50]:
             rows.append({
                 "source": parsed.feed.get("title", ""),
                 "title": e.get("title", ""),
@@ -112,7 +113,8 @@ def fetch_rss_bundle(bundle: str) -> pd.DataFrame:
             })
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce")
+        # ✅ force UTC tz-aware datetimes
+        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce", utc=True)
         df = df.sort_values("published_ts", ascending=False)
     return df
 
@@ -129,7 +131,8 @@ def fetch_newsapi_bundle(queries: List[str], language: str = "en") -> pd.DataFra
         try:
             r = requests.get(url, headers={"X-Api-Key": api_key}, timeout=25)
             r.raise_for_status()
-            for a in (r.json().get("articles") or []):
+            js = r.json()
+            for a in js.get("articles") or []:
                 rows.append({
                     "source": (a.get("source") or {}).get("name", ""),
                     "title": a.get("title", ""),
@@ -139,22 +142,34 @@ def fetch_newsapi_bundle(queries: List[str], language: str = "en") -> pd.DataFra
                     "origin": "newsapi",
                     "query": q,
                 })
-            time.sleep(0.15)
+            time.sleep(0.2)
         except Exception:
             continue
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce")
+        # ✅ force UTC tz-aware datetimes
+        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce", utc=True)
         df = df.sort_values("published_ts", ascending=False)
     return df
 
+
 def merge_news_and_dedupe(rss_df: pd.DataFrame, newsapi_df: pd.DataFrame) -> pd.DataFrame:
-    if rss_df.empty and newsapi_df.empty:
+    if (rss_df is None or rss_df.empty) and (newsapi_df is None or newsapi_df.empty):
         return pd.DataFrame(columns=["source","published_ts","title","sentiment","link","origin"])
     df = pd.concat([rss_df, newsapi_df], ignore_index=True)
-    df = df.drop_duplicates(subset=["link"]).copy() if "link" in df.columns else df.drop_duplicates(subset=["title"]).copy()
-    if "published" in df.columns and "published_ts" not in df.columns:
-        df["published_ts"] = pd.to_datetime(df["published"], errors="coerce")
+
+    # De-dup on link/title
+    if "link" in df.columns:
+        df = df.drop_duplicates(subset=["link"]).copy()
+    elif "title" in df.columns:
+        df = df.drop_duplicates(subset=["title"]).copy()
+
+    # ✅ normalize published_ts to UTC (tz-aware) regardless of input
+    if "published_ts" in df.columns:
+        df["published_ts"] = pd.to_datetime(df["published_ts"], errors="coerce", utc=True)
+    else:
+        df["published_ts"] = pd.to_datetime(df.get("published"), errors="coerce", utc=True)
+
     return df.sort_values("published_ts", ascending=False)
 
 # ---------------------- Google Trends ----------------------
