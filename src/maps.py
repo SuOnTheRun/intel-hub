@@ -2,11 +2,13 @@ import pydeck as pdk
 import pandas as pd
 import streamlit as st
 
-def render_global_air_map(df: pd.DataFrame):
+def render_global_air_map(df: pd.DataFrame, center=None, zoom=4):
     if df is None or df.empty:
         st.info("No live aircraft in the selected region right now.")
         return
-    view_state = pdk.ViewState(latitude=float(df["latitude"].mean()), longitude=float(df["longitude"].mean()), zoom=4, pitch=30)
+    lat = float(df["latitude"].mean()); lon = float(df["longitude"].mean())
+    if center: lat, lon = center
+    view_state = pdk.ViewState(latitude=lat, longitude=lon, zoom=zoom, pitch=30)
     scatter = pdk.Layer(
         "ScatterplotLayer",
         data=df.rename(columns={"latitude":"lat","longitude":"lon"}),
