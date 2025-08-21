@@ -196,23 +196,24 @@ def fetch_google_trends(topics: List[str]) -> pd.DataFrame:
 
 # ---------------------- OpenSky (positions + optional tracks) ----------------------
 
-def fetch_opensky_air_traffic(bbox: str = None) -> pd.DataFrame:
-    if not bbox:
-        bbox = "5,60,35,100"
-    min_lat, min_lon, max_lat, max_lon = [float(x) for x in bbox.split(",")]
+def fetch_opensky_air_traffic(bbox: str = None, allow_global_fallback: bool = True) -> pd.DataFrame:
     base = "https://opensky-network.org/api/states/all"
     auth = None
     if os.getenv("OPENSKY_USERNAME") and os.getenv("OPENSKY_PASSWORD"):
         auth = (os.getenv("OPENSKY_USERNAME"), os.getenv("OPENSKY_PASSWORD"))
-    params = {"lamin": min_lat, "lomin": min_lon, "lamax": max_lat, "lomax": max_lon}
+    params = {}
+    if bbox:
+        min_lat, min_lon, max_lat, max_lon = [float(x) for x in bbox.split(",")]
+        params = {"lamin": min_lat, "lomin": min_lon, "lamax": max_lat, "lomax": max_lon}
     r = requests.get(base, params=params, auth=auth, timeout=20)
+    if r.status_code != 200 and allow_global_fallback:
+        r = requests.get(base, timeout=20)  # global sample (real, may be rate-limited)
     r.raise_for_status()
     states = (r.json() or {}).get("states", []) or []
     cols = [
         "icao24","callsign","origin_country","time_position","last_contact",
         "longitude","latitude","baro_altitude","on_ground","velocity","true_track",
-        "vertical_rate","sensors","geo_altitude","squawk","spi","position_source",
-        "category"
+        "vertical_rate","sensors","geo_altitude","squawk","spi","position_source","category"
     ]
     rows = []
     for s in states:
@@ -222,6 +223,7 @@ def fetch_opensky_air_traffic(bbox: str = None) -> pd.DataFrame:
     if not df.empty:
         df = df.dropna(subset=["latitude","longitude"])
     return df
+
 
 def fetch_opensky_tracks_for_icao24(icao24: str) -> pd.DataFrame:
     """Fetch recent track (last ~1h) for a given aircraft if authenticated; anonymous may fail."""
