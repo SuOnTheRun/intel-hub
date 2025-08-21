@@ -23,18 +23,39 @@ def render_kpi_row(kpis: dict):
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1: _kpi_card("Intelligence Reports", kpis.get("total_reports", 0))
     with c2: _kpi_card("Movement Detections", kpis.get("movement", 0))
-    with c3: _kpi_card("High‑Risk Regions", kpis.get("high_risk_regions", 0))
+    with c3: _kpi_card("High-Risk Regions", kpis.get("high_risk_regions", 0))
     with c4: _kpi_card("Aircraft Tracked", kpis.get("aircraft", 0))
     with c5: _kpi_card("Average Risk Score", kpis.get("avg_risk", 0), "Composite signal")
+
+def render_event_cards(df: pd.DataFrame, title="Top Events", n=12):
+    st.markdown(f"#### {title}")
+    if df is None or df.empty:
+        st.info("No events in the selected filter window.")
+        return
+    cards = df.sort_values("risk", ascending=False).head(n)[["published_ts","region","topic","title","risk","sentiment","source","origin","link"]]
+    cols = st.columns(3)
+    i = 0
+    for _, r in cards.iterrows():
+        with cols[i % 3]:
+            st.markdown(f"""
+            <div style="border:1px solid #eee; border-radius:12px; padding:12px 14px; margin-bottom:12px; background:#fff;">
+              <div style="font-size:11px; color:#777;">{r['region']} · {r['topic']} · {str(r['published_ts'])[:16]} UTC</div>
+              <div style="font-weight:700; margin:6px 0 8px 0; line-height:1.25">{r['title']}</div>
+              <div style="font-size:12px; color:#666;">Risk {r['risk']} · Sentiment {round(r['sentiment'],2)} · {r['source']} ({r['origin']})</div>
+              <div style="margin-top:8px;">
+                <a href="{r['link']}" target="_blank" style="font-size:12px; text-decoration:none; border:1px solid #111; padding:6px 10px; border-radius:8px;">Open source</a>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+        i += 1
 
 def render_news_table(df: pd.DataFrame, title="Live Intelligence Feed"):
     st.markdown(f"#### {title}")
     if df is None or df.empty:
         st.info("No articles available at the moment.")
         return
-    cols = ["published_ts","region","topic","title","sentiment","source","origin","link"]
-    dfv = df[cols].sort_values("published_ts", ascending=False).head(300)
-    st.dataframe(dfv, use_container_width=True, height=560)
+    cols = ["published_ts","region","topic","title","risk","sentiment","source","origin","link"]
+    st.dataframe(df[cols].sort_values("published_ts", ascending=False).head(400), use_container_width=True, height=560)
 
 def render_markets(df: pd.DataFrame):
     st.markdown("#### Markets")
@@ -46,8 +67,7 @@ def render_markets(df: pd.DataFrame):
     c1, c2 = st.columns([1,2])
     with c1:
         show_cols = ["ticker","price","change_1d","volume"]
-        if "source" in df.columns:
-            show_cols.append("source")
+        if "source" in df.columns: show_cols.append("source")
         st.dataframe(df[show_cols], use_container_width=True, height=420)
     with c2:
         fig = px.bar(df, x="ticker", y="change_1d", title="Daily Change (%)")
@@ -73,7 +93,7 @@ def render_regions_grid(df: pd.DataFrame, expanded: bool=False):
         st.dataframe(sub, use_container_width=True, height=220)
         if expanded:
             st.markdown("**Latest in region**")
-            st.dataframe(df[df["region"] == r][["published_ts","topic","title","sentiment","source","origin","link"]].head(40),
+            st.dataframe(df[df["region"] == r][["published_ts","topic","title","risk","sentiment","source","origin","link"]].head(40),
                          use_container_width=True, height=360)
 
 def render_feed_panel(news_df: pd.DataFrame, gdelt_df: pd.DataFrame):
