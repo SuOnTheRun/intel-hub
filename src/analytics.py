@@ -1,16 +1,15 @@
 import pandas as pd
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from rapidfuzz import fuzz
 from .presets import REGION_PRESETS, region_keywords
 
 _an = SentimentIntensityAnalyzer()
 
-# -------------------- Topic & source config --------------------
-
 TOPIC_MAP = {
-    "Security":  ["attack","strike","missile","drone","shelling","ceasefire","sanction","mobilization","military","naval","army"],
-    "Mobility":  ["flight","airport","airspace","rail","border","vessel","ship","tanker","port","blockade"],
+    "Security":  ["attack","strike","missile","drone","shelling","ceasefire","sanction","mobilization","military","naval","army","casualty","evacuate"],
+    "Mobility":  ["flight","airport","airspace","rail","border","vessel","ship","tanker","port","blockade","notam"],
     "Markets":   ["markets","stocks","equity","bond","tariff","inflation","currency","oil","gas","commodity"],
-    "Elections": ["election","vote","ballot","poll","campaign","parliament"],
+    "Elections": ["election","vote","ballot","poll","campaign","parliament","rally"],
     "Technology":["ai","semiconductor","chip","cyber","data","cloud","satellite"],
     "Retail":    ["retail","consumer","footfall","ecommerce","store"],
     "Energy":    ["pipeline","refinery","power","grid","nuclear","renewable","solar","coal"],
@@ -21,13 +20,9 @@ SOURCE_WEIGHTS = {
     "reuters": 1.25, "bbc": 1.2, "associated press": 1.2, "ap": 1.2,
     "al jazeera": 1.1, "financial times": 1.15, "bloomberg": 1.15, "nytimes": 1.15
 }
-TOPIC_WEIGHTS = {"Security":1.5,"Mobility":1.25,"Elections":1.2,"Markets":1.15,"Energy":1.15,"Technology":1.1,"Retail":1.05}
+TOPIC_WEIGHTS = {"Security":1.6,"Mobility":1.3,"Elections":1.2,"Markets":1.15,"Energy":1.2,"Technology":1.1,"Retail":1.05}
 
-# -------------------- Helpers --------------------
-
-def _ensure_utc(ts_series: pd.Series) -> pd.Series:
-    """Coerce any datetime-ish series to tz-aware UTC (safe even if already UTC)."""
-    return pd.to_datetime(ts_series, errors="coerce", utc=True)
+def _ensure_utc(ts): return pd.to_datetime(ts, errors="coerce", utc=True)
 
 def _classify_topic(text: str) -> str:
     t = (text or "").lower()
@@ -45,100 +40,100 @@ def _classify_region(text: str) -> str:
     return "Global"
 
 def _vader_sent(text: str) -> float:
-    if not isinstance(text, str):
-        return 0.0
+    if not isinstance(text, str): return 0.0
     return _an.polarity_scores(text)["compound"]
-
-# -------------------- Main transforms --------------------
 
 def enrich_news_with_topics_regions(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame(columns=["source","published_ts","title","link","origin","region","topic","sentiment"])
     d = df.copy()
-    # guarantee a tz-aware UTC column for downstream filters/sorts
-    if "published_ts" in d.columns:
-        d["published_ts"] = _ensure_utc(d["published_ts"])
-    else:
-        d["published_ts"] = _ensure_utc(d.get("published"))
+    d["published_ts"] = _ensure_utc(d["published_ts"] if "published_ts" in d.columns else d.get("published"))
     d["region"]    = d["title"].fillna("").apply(_classify_region)
     d["topic"]     = d["title"].fillna("").apply(_classify_topic)
     d["sentiment"] = d["title"].fillna("").apply(_vader_sent)
     return d
 
 def _risk_row(row) -> float:
-    # Recency (hours) using tz-aware “now”
     recency_h = 12.0
     try:
         now_utc = pd.Timestamp.now(tz="UTC")
         if pd.notna(row.get("published_ts")):
-            recency_h = max(0.25, (now_utc - row["published_ts"]).total_seconds() / 3600.0)
+            recency_h = max(0.25, (now_utc - row["published_ts"]).total_seconds()/3600.0)
     except Exception:
         pass
-    # Topic weight
     tw = TOPIC_WEIGHTS.get(row.get("topic",""), 1.0)
-    # Source weight
     sw = 1.0
     s = (row.get("source") or "").lower()
-    for k, v in SOURCE_WEIGHTS.items():
-        if k in s:
-            sw = v
-            break
-    # Sentiment (more negative ⇒ higher)
+    for k,v in SOURCE_WEIGHTS.items():
+        if k in s: sw = v; break
     sent = row.get("sentiment", 0.0)
-    sf = 1.0 + max(0.0, -sent)
-    score = 100 * tw * sw * sf / (1 + 0.15 * recency_h)
+    sf = 1.1 + max(0.0, -sent)  # penalize negative less (actionable > purely negative)
+    # boost for strong security words
+    title = (row.get("title") or "").lower()
+    if any(w in title for w in ["attack","strike","drone","missile","evacuate","casualty","explosion","airspace closed","notam"]):
+        tw *= 1.15
+    score = 100 * tw * sw * sf / (1 + 0.15*recency_h)
     return round(score, 1)
 
 def add_risk_scores(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
+    if df is None or df.empty: return df
     d = df.copy()
-    # normalize again (cheap, safe)
-    d["published_ts"] = _ensure_utc(d["published_ts"]) if "published_ts" in d.columns else pd.NaT
+    d["published_ts"] = _ensure_utc(d["published_ts"])
     d["risk"] = d.apply(_risk_row, axis=1)
     return d
 
 def filter_by_controls(df: pd.DataFrame, region: str, topics: list, hours: int) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
+    if df is None or df.empty: return df
     d = df.copy()
-    # ensure UTC timestamps before filtering by time
-    if "published_ts" in d.columns:
-        d["published_ts"] = _ensure_utc(d["published_ts"])
-    # region filter
+    d["published_ts"] = _ensure_utc(d["published_ts"])
     if region and region != "Global":
         d = d[d["region"] == region]
-        if len(d) < 10:
+        if len(d) < 15:
             keys = region_keywords(region)
             if keys:
-                d = df[df["title"].str.lower().str.contains("|".join(keys), na=False)]
-                if "published_ts" in d.columns:
-                    d["published_ts"] = _ensure_utc(d["published_ts"])
-    # topic filter
+                d = pd.concat([d, df[df["title"].str.lower().str.contains("|".join(keys), na=False)]], ignore_index=True).drop_duplicates(subset=["link","title"])
     if topics:
         d = d[d["topic"].isin(topics)]
-    # time window
-    if hours and "published_ts" in d.columns:
+    if hours:
         cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=hours)
         d = d[d["published_ts"] >= cutoff]
+        if len(d) < 20:
+            # auto-widen the time window to avoid empty page
+            cutoff2 = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=96)
+            d = pd.concat([d, df[df["published_ts"] >= cutoff2]], ignore_index=True).drop_duplicates(subset=["link","title"])
     return d
+
+# ---- Clustering similar headlines (rapidfuzz) ----
+
+def cluster_headlines(df: pd.DataFrame, sim: int = 70) -> pd.DataFrame:
+    """Group near-duplicate titles; keep the highest-risk exemplar per cluster."""
+    if df is None or df.empty: return df
+    d = df.sort_values("risk", ascending=False).copy()
+    used = set()
+    clusters = []
+    titles = d["title"].fillna("").tolist()
+    for i, t in enumerate(titles):
+        if i in used: continue
+        group_idx = [i]
+        for j in range(i+1, len(titles)):
+            if j in used: continue
+            if fuzz.token_set_ratio(t, titles[j]) >= sim:
+                group_idx.append(j); used.add(j)
+        used.add(i)
+        exemplar = d.iloc[group_idx].sort_values("risk", ascending=False).iloc[0]
+        exemplar["cluster_size"] = len(group_idx)
+        clusters.append(exemplar)
+    return pd.DataFrame(clusters)
 
 def aggregate_kpis(news_df: pd.DataFrame, gdelt_df: pd.DataFrame, air_df: pd.DataFrame) -> dict:
     total_reports = (0 if news_df is None else len(news_df)) + (0 if gdelt_df is None else len(gdelt_df))
-    high_risk_regions = (
-        news_df[news_df["topic"].isin(["Security"])].groupby("region").size().shape[0]
-        if news_df is not None and not news_df.empty else 0
-    )
+    high_risk_regions = (news_df[news_df["topic"].eq("Security")].groupby("region").size().shape[0]
+                         if news_df is not None and not news_df.empty else 0)
     aircraft_tracked = 0 if air_df is None else len(air_df)
     movement_detections = (air_df["on_ground"] == False).sum() if air_df is not None and not air_df.empty else 0
     avg_risk = round(max(0, min(10, 5 + (high_risk_regions/4))), 1)
-    return dict(
-        total_reports=total_reports,
-        movement=movement_detections,
-        high_risk_regions=high_risk_regions,
-        aircraft=aircraft_tracked,
-        avg_risk=avg_risk,
-    )
+    return dict(total_reports=total_reports, movement=movement_detections,
+                high_risk_regions=high_risk_regions, aircraft=aircraft_tracked, avg_risk=avg_risk)
 
 def build_social_listening_panels(news_df: pd.DataFrame, reddit_df: pd.DataFrame):
     blocks = []
