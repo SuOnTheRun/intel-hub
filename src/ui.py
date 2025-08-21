@@ -32,14 +32,15 @@ def render_event_cards(df: pd.DataFrame, title="Top Events", n=12):
     if df is None or df.empty:
         st.info("No events in the selected filter window.")
         return
-    cards = df.sort_values("risk", ascending=False).head(n)[["published_ts","region","topic","title","risk","sentiment","source","origin","link"]]
+    cards = df.sort_values("risk", ascending=False).head(n)[["published_ts","region","topic","title","risk","sentiment","source","origin","link","cluster_size"]]
     cols = st.columns(3)
     i = 0
     for _, r in cards.iterrows():
+        cluster = int(r.get("cluster_size") or 1)
         with cols[i % 3]:
             st.markdown(f"""
             <div style="border:1px solid #eee; border-radius:12px; padding:12px 14px; margin-bottom:12px; background:#fff;">
-              <div style="font-size:11px; color:#777;">{r['region']} · {r['topic']} · {str(r['published_ts'])[:16]} UTC</div>
+              <div style="font-size:11px; color:#777;">{r['region']} · {r['topic']} · {str(r['published_ts'])[:16]} UTC · x{cluster}</div>
               <div style="font-weight:700; margin:6px 0 8px 0; line-height:1.25">{r['title']}</div>
               <div style="font-size:12px; color:#666;">Risk {r['risk']} · Sentiment {round(r['sentiment'],2)} · {r['source']} ({r['origin']})</div>
               <div style="margin-top:8px;">
