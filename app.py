@@ -3,10 +3,10 @@ import streamlit as st
 import pandas as pd
 
 from src.theming import apply_page_style
-from src.presets import region_names, region_bbox, region_center
+from src.presets import region_names, region_bbox, region_center, region_keywords
 from src.analytics import (
     enrich_news_with_topics_regions, aggregate_kpis, build_social_listening_panels,
-    add_risk_scores, filter_by_controls, TOPIC_LIST,
+    add_risk_scores, filter_by_controls, TOPIC_LIST, cluster_headlines,
 )
 from src.data_sources import (
     fetch_market_snapshot, fetch_rss_bundle, fetch_newsapi_bundle, merge_news_and_dedupe,
@@ -27,34 +27,43 @@ render_header()
 # ---------------- Sidebar Filters ----------------
 with st.sidebar:
     st.markdown("#### Filters")
-    region = st.selectbox("Region preset", options=region_names(), index=region_names().index("Indo-Pacific"))
+    rnames = region_names()
+    default_idx = rnames.index("Indo-Pacific") if "Indo-Pacific" in rnames else 0
+    region = st.selectbox("Region preset", options=rnames, index=default_idx)
     hours = st.slider("Time window (hours)", min_value=6, max_value=96, value=48, step=6)
     topics = st.multiselect("Topics", options=TOPIC_LIST, default=["Security","Mobility","Markets","Elections"])
     tickers = st.text_input("Tickers (comma-separated)", value=os.getenv("DEFAULT_TICKERS","RELIANCE.NS,TCS.NS,INFY.NS,^NSEI,TSLA,AAPL,MSFT"))
     rss_bundle = st.selectbox("RSS bundle", options=["world_major","business_tech"], index=0)
     widen_air = st.checkbox("Fallback to global air traffic when region is quiet", value=True)
-    st.caption("Optional APIs via Render env vars: NEWSAPI_KEY · POLYGON_ACCESS_KEY · REDDIT_* · OPENSKY_*")
+    st.caption("APIs via env vars: NEWSAPI_KEY · POLYGON_ACCESS_KEY · REDDIT_* · OPENSKY_*")
 
 # ---------------- Data Pulls ----------------
 tickers_list = [t.strip() for t in tickers.split(",") if t.strip()]
 markets_df = fetch_market_snapshot(tickers_list)
 
+# Query strategy: region term + topics + region keywords (expands recall)
+region_term = region
+queries = [region_term] + topics + region_keywords(region)
 rss_df = fetch_rss_bundle(rss_bundle)
-newsapi_df = fetch_newsapi_bundle([region] + topics)  # bias NewsAPI to region/topic terms
+newsapi_df = fetch_newsapi_bundle(queries)
 news_df_raw = merge_news_and_dedupe(rss_df, newsapi_df)
 
+# Enrich + risk + filter + cluster (auto-widen inside filter)
 news_df = enrich_news_with_topics_regions(news_df_raw)
 news_df = add_risk_scores(news_df)
 news_df = filter_by_controls(news_df, region=region, topics=topics, hours=hours)
+clustered = cluster_headlines(news_df, sim=72)
 
-gdelt_df = fetch_gdelt_events([region] + topics)
+gdelt_df = fetch_gdelt_events(queries)
 if not gdelt_df.empty:
     gdelt_df = enrich_news_with_topics_regions(gdelt_df)
     gdelt_df = add_risk_scores(gdelt_df)
     gdelt_df = filter_by_controls(gdelt_df, region=region, topics=topics, hours=hours)
+    clustered_gdelt = cluster_headlines(gdelt_df, sim=72)
+else:
+    clustered_gdelt = pd.DataFrame()
 
 trends_df = fetch_google_trends(topics)
-
 bbox = region_bbox(region)
 try:
     air_df = fetch_opensky_air_traffic(bbox=bbox, allow_global_fallback=widen_air)
@@ -74,8 +83,10 @@ tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.
 
 with tab_overview:
     render_kpi_row(kpis)
-    render_event_cards(pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df, "Top Events", n=12)
+    top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
+    render_event_cards(top_events, "Top Events", n=12)
     st.markdown("##### Global Intelligence Map")
+    from src.presets import region_center
     render_global_air_map(air_df, center=region_center(region), zoom=4)
 
 with tab_regions:
@@ -86,6 +97,7 @@ with tab_feed:
 
 with tab_mobility:
     st.markdown("##### Live Air Traffic")
+    from src.presets import region_center
     render_global_air_map(air_df, center=region_center(region), zoom=5)
     if not air_df.empty and "icao24" in air_df.columns:
         icao24s = sorted(air_df["icao24"].dropna().unique().tolist())
