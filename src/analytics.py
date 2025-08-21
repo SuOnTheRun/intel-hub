@@ -54,7 +54,8 @@ def _risk_row(row) -> float:
     # Recency (hours)
     recency_h = 12.0
     try:
-        recency_h = max(0.25, (pd.Timestamp.utcnow().tz_localize("UTC") - row["published_ts"]).total_seconds()/3600.0)
+        now_utc = pd.Timestamp.now(tz="UTC")  # ✅ tz-aware safely
+        recency_h = max(0.25, (now_utc - row["published_ts"]).total_seconds() / 3600.0)
     except Exception:
         pass
     # Topic
@@ -62,13 +63,14 @@ def _risk_row(row) -> float:
     # Source
     sw = 1.0
     s = (row.get("source") or "").lower()
-    for k,v in SOURCE_WEIGHTS.items():
+    for k, v in SOURCE_WEIGHTS.items():
         if k in s:
-            sw = v; break
+            sw = v
+            break
     # Sentiment (more negative ⇒ higher)
     sent = row.get("sentiment", 0.0)
     sf = 1.0 + max(0.0, -sent)
-    score = 100 * tw * sw * sf / (1 + 0.15*recency_h)
+    score = 100 * tw * sw * sf / (1 + 0.15 * recency_h)
     return round(score, 1)
 
 def add_risk_scores(df: pd.DataFrame) -> pd.DataFrame:
@@ -78,20 +80,22 @@ def add_risk_scores(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 def filter_by_controls(df: pd.DataFrame, region: str, topics: list, hours: int) -> pd.DataFrame:
-    if df is None or df.empty: return df
+    if df is None or df.empty: 
+        return df
     d = df.copy()
     if region and region != "Global":
         d = d[d["region"] == region]
-        # widen content by region keywords if too few results
         if len(d) < 10:
             keys = region_keywords(region)
             d = df[df["title"].str.lower().str.contains("|".join(keys), na=False)]
     if topics:
         d = d[d["topic"].isin(topics)]
     if hours and "published_ts" in d.columns:
-        cutoff = pd.Timestamp.utcnow().tz_localize("UTC") - pd.Timedelta(hours=hours)
+        # ✅ get an already tz-aware UTC “now”
+        cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=hours)
         d = d[d["published_ts"] >= cutoff]
     return d
+
 
 def aggregate_kpis(news_df: pd.DataFrame, gdelt_df: pd.DataFrame, air_df: pd.DataFrame) -> dict:
     total_reports = (0 if news_df is None else len(news_df)) + (0 if gdelt_df is None else len(gdelt_df))
