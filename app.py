@@ -7,7 +7,6 @@ from src.presets import region_names, region_bbox, region_center, region_keyword
 from src.analytics import (
     enrich_news_with_topics_regions, aggregate_kpis, build_social_listening_panels,
     add_risk_scores, filter_by_controls, TOPIC_LIST, cluster_headlines,
-    # NEW ↓
     add_emotions, extend_kpis_with_intel
 )
 from src.data_sources import (
@@ -16,13 +15,13 @@ from src.data_sources import (
     fetch_reddit_posts_if_configured, fetch_gdelt_events,
 )
 from src.maps import render_global_air_map, render_tracks_map
-# later we will also call render_global_gdelt_map via local import in the tab
 from src.ui import (
     render_header, render_kpi_row, render_event_cards, render_news_table, render_markets,
     render_trends, render_reddit, render_regions_grid, render_feed_panel,
 )
 from src.exporters import download_buttons
 
+# ---------------- Page setup ----------------
 st.set_page_config(page_title="Strategic Intelligence War Room", layout="wide", initial_sidebar_state="collapsed")
 apply_page_style()
 render_header()
@@ -35,7 +34,10 @@ with st.sidebar:
     region = st.selectbox("Region preset", options=rnames, index=default_idx)
     hours = st.slider("Time window (hours)", min_value=6, max_value=96, value=48, step=6)
     topics = st.multiselect("Topics", options=TOPIC_LIST, default=["Security","Mobility","Markets","Elections"])
-    tickers = st.text_input("Tickers (comma-separated)", value=os.getenv("DEFAULT_TICKERS","RELIANCE.NS,TCS.NS,INFY.NS,^NSEI,TSLA,AAPL,MSFT"))
+    tickers = st.text_input(
+        "Tickers (comma-separated)",
+        value=os.getenv("DEFAULT_TICKERS","RELIANCE.NS,TCS.NS,INFY.NS,^NSEI,TSLA,AAPL,MSFT")
+    )
     rss_bundle = st.selectbox("RSS bundle", options=["world_major","business_tech"], index=0)
     widen_air = st.checkbox("Fallback to global air traffic when region is quiet", value=True)
     st.caption("APIs via env vars: NEWSAPI_KEY · POLYGON_ACCESS_KEY · REDDIT_* · OPENSKY_*")
@@ -71,7 +73,6 @@ news_df = add_emotions(news_df)
 if not gdelt_df.empty:
     gdelt_df = add_emotions(gdelt_df)
 
-
 trends_df = fetch_google_trends(topics)
 bbox = region_bbox(region)
 try:
@@ -80,13 +81,30 @@ except Exception:
     air_df = pd.DataFrame()
 
 reddit_df = fetch_reddit_posts_if_configured(["economy","geopolitics","advertising","marketing"])
-social_panels = build_social_listening_panels(pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df, reddit_df)
+social_panels = build_social_listening_panels(
+    pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
+    reddit_df
+)
 
-# KPIs (existing) + extended intelligence KPIs
-kpis = aggregate_kpis(pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df, gdelt_df, air_df)
+# ---------------- KPIs ----------------
+kpis = aggregate_kpis(
+    pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
+    gdelt_df,
+    air_df
+)
 kpis = extend_kpis_with_intel(kpis, news_df, gdelt_df if not gdelt_df.empty else None, air_df)
-download_buttons(news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df, air_df=air_df, trends_df=trends_df, reddit_df=reddit_df)
 
+download_buttons(
+    news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df,
+    air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
+)
+
+# ---------------- Tabs (must be BEFORE the with-blocks) ----------------
+tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.tabs(
+    ["Overview","Regional Analysis","Intelligence Feed","Movement Tracking","Markets","Social Listening"]
+)
+
+# ---------------- Tab bodies ----------------
 with tab_overview:
     from src.ui import render_kpi_row_intel, render_event_cards_with_emotion
     render_kpi_row_intel(kpis)
@@ -97,12 +115,13 @@ with tab_overview:
     st.markdown("##### Global Intelligence Map")
     from src.presets import region_center
     from src.maps import render_global_gdelt_map
-    # Show risk/event heat on Overview; mobility map remains on Mobility tab
     render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
 
-
 with tab_regions:
-    render_regions_grid(pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df, expanded=True)
+    render_regions_grid(
+        pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
+        expanded=True
+    )
 
 with tab_feed:
     render_feed_panel(news_df, gdelt_df)
