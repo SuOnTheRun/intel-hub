@@ -3,6 +3,16 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rapidfuzz import fuzz
 from .presets import REGION_PRESETS, region_keywords
 
+# ---- NRC EmoLex optional import (safe) ----
+_EMO_OK = False
+try:
+    from nrclex import NRCLex  # pip package: nrclex
+    _EMO_OK = True
+except Exception:
+    class NRCLex:  # no-op fallback
+        def __init__(self, text):
+            self.raw_emotion_scores = {}
+
 # ---- NRC emotion lexicon (optional) ----
 # Robust, lazy import so the app never crashes if the package is missing.
 _EMO_OK = False
