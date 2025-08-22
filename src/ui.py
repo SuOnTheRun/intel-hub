@@ -2,6 +2,53 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+import plotly.graph_objects as go
+import streamlit as st
+
+def render_kpi_row_intel(kpis):
+    # Row 1: your current KPIs
+    cols1 = st.columns(5)
+    cols1[0].metric("Intelligence Reports", kpis.get("intelligence_reports", "—"))
+    cols1[1].metric("Movement Detections", kpis.get("movement_detections", "—"))
+    cols1[2].metric("High-Risk Regions", kpis.get("high_risk_regions", "—"))
+    cols1[3].metric("Aircraft Tracked", kpis.get("aircraft_tracked", "—"))
+    cols1[4].metric("Avg Risk Score", kpis.get("avg_risk_score", "—"))
+
+    # Row 2: new intelligence KPIs
+    cols2 = st.columns(4)
+    cols2[0].metric("Early Warning Index", kpis.get("early_warning", 0.0))
+    cols2[1].metric("Event Velocity (per hr)", kpis.get("event_velocity", 0.0))
+    cols2[2].metric("Mobility Anomalies", kpis.get("mobility_anomalies", 0))
+    cols2[3].metric("Dominant Emotion", kpis.get("emo_dominant_top", "—"))
+
+    # Emotion mix mini-bar
+    labels = ["Anger","Antic.","Disgust","Fear","Joy","Sadness","Surprise","Trust"]
+    mix = [kpis.get(f"emo_{k.lower()}", 0.0) for k in ["Anger","Anticipation","Disgust","Fear","Joy","Sadness","Surprise","Trust"]]
+    fig = go.Figure(go.Bar(x=labels, y=mix))
+    fig.update_layout(height=180, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+def render_event_cards_with_emotion(df, title, n=12):
+    if df is None or df.empty:
+        st.write("No events in window.")
+        return
+    st.subheader(title)
+    show = df.head(n)
+    cols = st.columns(3)
+    for i, (_, row) in enumerate(show.iterrows()):
+        with cols[i % 3]:
+            st.markdown(f"**{row.get('title','')}**")
+            meta = f"{row.get('region','Global')} · {row.get('topic','General')} · Risk {row.get('risk_score','—')}"
+            st.caption(meta)
+            emo = [row.get(f"emo_{k}",0.0) for k in ["fear","anger","sadness","joy","trust"]]
+            efig = go.Figure(go.Bar(x=["Fear","Anger","Sadness","Joy","Trust"], y=emo))
+            efig.update_layout(height=120, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+            st.plotly_chart(efig, use_container_width=True, config={"displayModeBar": False})
+            url = row.get("url")
+            if isinstance(url, str) and url:
+                st.link_button("Open source", url)
+
+
 def render_header():
     st.markdown("""
     <div style="padding:10px 6px 0 6px">
