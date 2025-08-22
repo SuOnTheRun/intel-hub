@@ -44,3 +44,21 @@ def render_tracks_map(track_df: pd.DataFrame):
     )
     r = pdk.Deck(layers=[line], initial_view_state=view_state, map_style="mapbox://styles/mapbox/dark-v11")
     st.pydeck_chart(r, use_container_width=True)
+
+import plotly.express as px
+import streamlit as st
+
+def render_global_gdelt_map(gdelt_df, center=(20, 78), zoom=3):
+    if gdelt_df is None or gdelt_df.empty:
+        return
+    if not {"lat","lon"}.issubset(set(gdelt_df.columns)):
+        return
+    fig = px.density_mapbox(
+        gdelt_df.dropna(subset=["lat","lon"]),
+        lat="lat", lon="lon", z="risk_score" if "risk_score" in gdelt_df.columns else None,
+        radius=12, center={"lat": center[0], "lon": center[1]},
+        zoom=zoom, height=520
+    )
+    fig.update_layout(mapbox_style="carto-darkmatter", margin=dict(l=0,r=0,t=0,b=0))
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
