@@ -146,3 +146,117 @@ def build_social_listening_panels(news_df: pd.DataFrame, reddit_df: pd.DataFrame
         rr = reddit_df.sort_values("created_utc", ascending=False).head(100)
         blocks.append({"title": "Reddit — Latest Posts", "table": rr[["created_utc","subreddit","title","score","url","query"]]})
     return blocks
+
+
+# ========= EMOTION, VELOCITY, EARLY-WARNING UTILITIES =========
+from nrclex import NRCLex
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+EMOTION_KEYS = ["anger","anticipation","disgust","fear","joy","sadness","surprise","trust"]
+
+def _safe_text(x):
+    if isinstance(x, str) and x.strip():
+        return x.strip()
+    return ""
+
+def add_emotions(df, text_col="title"):
+    """
+    Adds emotion proportions per row from NRC EmoLex.
+    Columns: emo_anger...emo_trust, emo_dominant
+    """
+    if df is None or df.empty: 
+        return df
+    for k in EMOTION_KEYS:
+        df[f"emo_{k}"] = 0.0
+    dom = []
+    for t in df[text_col].astype(str).fillna(""):
+        text = _safe_text(t)
+        if not text:
+            dom.append("")
+            continue
+        emo = NRCLex(text)
+        raw = emo.raw_emotion_scores or {}
+        total = sum(raw.values()) or 1
+        row = {k: (raw.get(k,0)/total) for k in EMOTION_KEYS}
+        for k, v in row.items():
+            df.at[df.index[dom.__len__()], f"emo_{k}"] = v  # index-safe
+        dom.append(max(row, key=row.get) if row else "")
+    df["emo_dominant"] = dom
+    return df
+
+def compute_event_velocity(df, time_col="published"):
+    """
+    Clusters by hour bucket + topic label and returns 'events_per_hour'
+    as a global velocity signal and per-topic breakdown.
+    Assumes df[time_col] is datetime-like.
+    """
+    if df is None or df.empty:
+        return {"events_per_hour": 0.0, "by_topic": {}}
+    s = df.copy()
+    try:
+        s[time_col] = pd.to_datetime(s[time_col])
+    except Exception:
+        pass
+    s["hour_bucket"] = s[time_col].dt.floor("H")
+    by_hour = s.groupby("hour_bucket").size().sort_index()
+    events_per_hour = by_hour.tail(24).mean() if len(by_hour) else 0.0
+    by_topic = {}
+    if "topic" in s.columns:
+        by_topic = s.groupby(["hour_bucket","topic"]).size().unstack(fill_value=0).tail(24).mean().to_dict()
+    return {"events_per_hour": float(events_per_hour), "by_topic": {k: float(v) for k, v in by_topic.items()}}
+
+def compute_mobility_anomalies(air_df):
+    """
+    Flags simple anomalies: unusually dense flights in a bbox slice.
+    Returns count only (kept light for free hosting).
+    """
+    if air_df is None or air_df.empty:
+        return 0
+    # Heuristic: unique ICAO24s in last window vs rolling median (proxy by quantile)
+    q90 = air_df["icao24"].nunique() if "icao24" in air_df.columns else 0
+    # no time series history server-side; use spatial density heuristic
+    if "lon" in air_df.columns and "lat" in air_df.columns:
+        dense = (len(air_df) / max(1, air_df[["lon","lat"]].dropna().shape[0])) > 1.2
+        return int(q90 * (1.5 if dense else 1.0))
+    return int(q90)
+
+def compute_early_warning(df, gdelt_df=None, air_df=None):
+    """
+    Composite Early Warning Index (0–10) from: risk score, negative emotions, velocity, mobility anomalies.
+    Scaled to be stable under free-tier compute.
+    """
+    if df is None: 
+        df = pd.DataFrame()
+    pool = df
+    if gdelt_df is not None and not gdelt_df.empty:
+        pool = pd.concat([pool, gdelt_df], ignore_index=True)
+
+    n = len(pool)
+    if n == 0:
+        return 0.0
+
+    # Risk: use your existing 'risk_score' if available
+    risk = pool["risk_score"].mean() if "risk_score" in pool.columns else 0.0
+    risk_norm = np.clip(risk / 10.0, 0, 1)
+
+    # Emotion tilt: fear+anger+sadness – joy – trust (clamped)
+    for k in EMOTION_KEYS:
+        if f"emo_{k}" not in pool.columns:
+            pool[f"emo_{k}"] = 0.0
+    emo_neg = (pool["emo_fear"] + pool["emo_anger"] + pool["emo_sadness"]).mean()
+    emo_pos = (pool["emo_joy"] + pool["emo_trust"]).mean()
+    emo_tilt = np.clip((emo_neg - emo_pos + 1) / 2, 0, 1)
+
+    # Velocity
+    vel = compute_event_velocity(pool).get("events_per_hour", 0.0)
+    vel_norm = np.tanh(vel / 6.0)  # saturates gently
+
+    # Mobility anomalies
+    mob = compute_mobility_anomalies(air_df) if air_df is not None else 0
+    mob_norm = np.tanh(mob / 40.0)
+
+    # Blend (weights chosen for stability)
+    index_0_10 = 10.0 * (0.35*risk_norm + 0.25*emo_tilt + 0.25*vel_norm + 0.15*mob_norm)
+    return round(float(index_0_10), 1)
