@@ -2,6 +2,50 @@ import pandas as pd
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rapidfuzz import fuzz
 from .presets import REGION_PRESETS, region_keywords
+import re
+import pandas as pd
+import numpy as np
+
+EMOTION_KEYS = ["anger","anticipation","disgust","fear","joy","sadness","surprise","trust"]
+
+# Minimal but real lexicon (expand later as needed)
+_EMO_LEXICON = {
+    "anger": {"anger","furious","rage","outrage","irate","hostile","resent","fume","wrath","hate","attack","retaliation","provocation"},
+    "anticipation": {"anticipate","prepare","await","expect","upcoming","prospect","forecast","signal","likely","poised","build-up","mobilize"},
+    "disgust": {"disgust","vile","abhorrent","revolting","corrupt","scandal","shameful","disgrace","repulsive","heinous"},
+    "fear": {"fear","threat","terror","panic","worry","unsafe","attack","strike","escalation","airstrike","missile","dread","risk"},
+    "joy": {"joy","relief","win","progress","growth","peace","stability","prosper","celebrate","boost","record"},
+    "sadness": {"sad","grief","mourning","loss","deaths","casualties","downgrade","recession","decline","sorrow"},
+    "surprise": {"surprise","shock","unexpected","sudden","unprecedented","abrupt","caught off guard","stunning"},
+    "trust": {"trust","assure","pledge","agreement","deal","alliance","cooperate","support","aid","commit","credible"}
+}
+
+# Build inverse map: word -> set(emotions)
+_WORD2EMO = {}
+for emo, words in _EMO_LEXICON.items():
+    for w in words:
+        _WORD2EMO.setdefault(w.lower(), set()).add(emo)
+
+_token_re = re.compile(r"[A-Za-z][A-Za-z\-']+")
+
+def _fallback_emotions(text: str):
+    """Return normalized scores per emotion using the built-in lexicon."""
+    counts = {k: 0 for k in EMOTION_KEYS}
+    if not isinstance(text, str) or not text.strip():
+        return counts, ""
+    for tok in _token_re.findall(text.lower()):
+        emos = _WORD2EMO.get(tok)
+        if emos:
+            for e in emos:
+                counts[e] += 1
+    total = sum(counts.values())
+    if total == 0:
+        return counts, ""
+    for e in counts:
+        counts[e] = counts[e] / total
+    dominant = max(counts, key=counts.get)
+    return counts, dominant
+
 
 # ---- NRC EmoLex optional import (safe) ----
 _EMO_OK = False
@@ -190,8 +234,45 @@ def _safe_text(x):
         return x.strip()
     return ""
 def add_emotions(df, text_col="title"):
-    if (df is None) or df.empty or (not _EMO_OK):
+    """
+    Adds emotion proportions per row.
+    Prefers NRCLex when available; falls back to built-in lexicon otherwise.
+    Creates columns: emo_anger...emo_trust, emo_dominant
+    """
+    if df is None or df.empty:
         return df
+
+    # Ensure columns exist
+    for k in EMOTION_KEYS:
+        col = f"emo_{k}"
+        if col not in df.columns:
+            df[col] = 0.0
+    if "emo_dominant" not in df.columns:
+        df["emo_dominant"] = ""
+
+    if _EMO_OK:
+        # NRCLex path
+        dom = []
+        for idx, t in enumerate(df[text_col].astype(str).fillna("")):
+            emo = NRCLex(t)
+            raw = getattr(emo, "raw_emotion_scores", {}) or {}
+            total = sum(raw.values()) or 1
+            for k in EMOTION_KEYS:
+                df.at[df.index[idx], f"emo_{k}"] = raw.get(k, 0) / total
+            dom.append(max(raw, key=raw.get) if raw else "")
+        df["emo_dominant"] = dom
+        return df
+    else:
+        # Fallback lexicon path (no extra pip deps)
+        dom = []
+        for idx, t in enumerate(df[text_col].astype(str).fillna("")):
+            scores, top = _fallback_emotions(t)
+            for k in EMOTION_KEYS:
+                df.at[df.index[idx], f"emo_{k}"] = scores.get(k, 0.0)
+            dom.append(top)
+        df["emo_dominant"] = dom
+        return df
+
 
 
     # initialize columns if missing
