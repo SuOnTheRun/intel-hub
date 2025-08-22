@@ -3,6 +3,18 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rapidfuzz import fuzz
 from .presets import REGION_PRESETS, region_keywords
 
+# ---- NRC emotion lexicon (optional) ----
+# Robust, lazy import so the app never crashes if the package is missing.
+_EMO_OK = False
+try:
+    import importlib
+    NRCLex = importlib.import_module("nrclex").NRCLex  # pip package: nrclex
+    _EMO_OK = True
+except Exception:
+    class NRCLex:  # no-op fallback
+        def __init__(self, text):
+            self.raw_emotion_scores = {}
+
 _an = SentimentIntensityAnalyzer()
 
 TOPIC_MAP = {
@@ -167,14 +179,10 @@ def _safe_text(x):
     if isinstance(x, str) and x.strip():
         return x.strip()
     return ""
-
 def add_emotions(df, text_col="title"):
-    """
-    Adds emotion proportions per row from NRC EmoLex.
-    Columns: emo_anger...emo_trust, emo_dominant
-    """
     if (df is None) or df.empty or (not _EMO_OK):
         return df
+
 
     # initialize columns if missing
     for k in EMOTION_KEYS:
