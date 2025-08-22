@@ -11,3 +11,6 @@ vaderSentiment==3.3.2
 pydeck==0.9.1
 reportlab==4.2.2
 rapidfuzz==3.9.7
+nrclex==4.0
+scikit-learn>=1.3
+
