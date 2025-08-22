@@ -147,8 +147,10 @@ def build_social_listening_panels(news_df: pd.DataFrame, reddit_df: pd.DataFrame
         blocks.append({"title": "Reddit — Latest Posts", "table": rr[["created_utc","subreddit","title","score","url","query"]]})
     return blocks
 
-
 # ========= EMOTION, VELOCITY, EARLY-WARNING UTILITIES =========
+import pandas as pd
+import numpy as np
+
 # Safe import: do not crash if pip didn't install nrclex yet
 try:
     from nrclex import NRCLex  # pip package name: nrclex
@@ -158,8 +160,6 @@ except Exception:
     class NRCLex:  # no-op fallback so the app keeps running
         def __init__(self, text):
             self.raw_emotion_scores = {}
-import numpy as np
-import pandas as pd
 
 EMOTION_KEYS = ["anger","anticipation","disgust","fear","joy","sadness","surprise","trust"]
 
@@ -173,15 +173,16 @@ def add_emotions(df, text_col="title"):
     Adds emotion proportions per row from NRC EmoLex.
     Columns: emo_anger...emo_trust, emo_dominant
     """
-        if (df is None) or df.empty or (not _EMO_OK):
+    if (df is None) or df.empty or (not _EMO_OK):
         return df
-    # initialize columns
+
+    # initialize columns if missing
     for k in EMOTION_KEYS:
-        if f"emo_{k}" not in df.columns:
-            df[f"emo_{k}"] = 0.0
+        col = f"emo_{k}"
+        if col not in df.columns:
+            df[col] = 0.0
 
     dom = []
-    # iterate with integer index for at-assignment
     for idx, t in enumerate(df[text_col].astype(str).fillna("")):
         text = _safe_text(t)
         if not text:
@@ -190,18 +191,13 @@ def add_emotions(df, text_col="title"):
         emo = NRCLex(text)
         raw = emo.raw_emotion_scores or {}
         total = sum(raw.values()) or 1
-        row = {k: (raw.get(k,0)/total) for k in EMOTION_KEYS}
-        for k, v in row.items():
-            df.at[df.index[idx], f"emo_{k}"] = v
-        dom.append(max(row, key=row.get) if row else "")
+        for k in EMOTION_KEYS:
+            df.at[df.index[idx], f"emo_{k}"] = raw.get(k, 0) / total
+        dom.append(max(raw, key=raw.get) if raw else "")
     df["emo_dominant"] = dom
     return df
 
 def compute_event_velocity(df, time_col="published"):
-    """
-    Clusters by hour bucket + topic label and returns 'events_per_hour'
-    plus per-topic velocity breakdown.
-    """
     if df is None or df.empty:
         return {"events_per_hour": 0.0, "by_topic": {}}
     s = df.copy()
@@ -218,84 +214,47 @@ def compute_event_velocity(df, time_col="published"):
     return {"events_per_hour": float(events_per_hour), "by_topic": {k: float(v) for k, v in by_topic.items()}}
 
 def compute_mobility_anomalies(air_df):
-    """
-    Flags simple anomalies: unusually dense flights in current window.
-    Returns an integer count proxy.
-    """
     if air_df is None or air_df.empty:
         return 0
     uniq = air_df["icao24"].nunique() if "icao24" in air_df.columns else 0
     return int(uniq)
 
 def compute_early_warning(df, gdelt_df=None, air_df=None):
-    """
-    Composite Early Warning Index (0–10) from:
-    - risk score
-    - negative vs positive emotion tilt
-    - event velocity
-    - mobility anomalies
-    """
     if df is None:
         df = pd.DataFrame()
     pool = df
     if gdelt_df is not None and not gdelt_df.empty:
         pool = pd.concat([pool, gdelt_df], ignore_index=True)
-
     if pool is None or pool.empty:
         return 0.0
-
-    # Risk
     risk = pool["risk_score"].mean() if "risk_score" in pool.columns else 0.0
     risk_norm = np.clip(risk / 10.0, 0, 1)
-
-    # Emotion tilt
     for k in EMOTION_KEYS:
         if f"emo_{k}" not in pool.columns:
             pool[f"emo_{k}"] = 0.0
     emo_neg = (pool["emo_fear"] + pool["emo_anger"] + pool["emo_sadness"]).mean()
     emo_pos = (pool["emo_joy"] + pool["emo_trust"]).mean()
     emo_tilt = np.clip((emo_neg - emo_pos + 1) / 2, 0, 1)
-
-    # Velocity
     vel = compute_event_velocity(pool).get("events_per_hour", 0.0)
     vel_norm = np.tanh(vel / 6.0)
-
-    # Mobility
     mob = compute_mobility_anomalies(air_df) if air_df is not None else 0
     mob_norm = np.tanh(mob / 40.0)
-
     index_0_10 = 10.0 * (0.35*risk_norm + 0.25*emo_tilt + 0.25*vel_norm + 0.15*mob_norm)
     return round(float(index_0_10), 1)
 
 def extend_kpis_with_intel(kpis, news_df, gdelt_df, air_df):
-    """
-    Extends your existing KPI dict with:
-      - early_warning
-      - event_velocity
-      - mobility_anomalies
-      - emotion mix (averages) + dominant emotion label
-    """
     if kpis is None:
         kpis = {}
-
-    # ensure emotion columns exist on both sets
+    # enrich with emotions (no-op if _EMO_OK is False)
     news_df = add_emotions(news_df) if (news_df is not None and not news_df.empty) else news_df
     if gdelt_df is not None and not getattr(gdelt_df, "empty", True):
         gdelt_df = add_emotions(gdelt_df)
-
-    # Early warning
     kpis["early_warning"] = compute_early_warning(news_df, gdelt_df, air_df)
-
-    # Velocity
     from pandas import concat
     pool = concat([news_df, gdelt_df], ignore_index=True) if (gdelt_df is not None and not gdelt_df.empty) else news_df
     vel = compute_event_velocity(pool).get("events_per_hour", 0.0) if (pool is not None and not pool.empty) else 0.0
     kpis["event_velocity"] = round(float(vel), 2)
-
-    # Mobility anomalies
     kpis["mobility_anomalies"] = compute_mobility_anomalies(air_df)
-
-    # Emotion mix
     if pool is not None and not pool.empty:
         for k in EMOTION_KEYS:
             col = f"emo_{k}"
