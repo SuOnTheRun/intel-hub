@@ -151,8 +151,7 @@ def build_social_listening_panels(news_df: pd.DataFrame, reddit_df: pd.DataFrame
 # ========= EMOTION, VELOCITY, EARLY-WARNING UTILITIES =========
 from nrclex import NRCLex
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import pandas as pd
 
 EMOTION_KEYS = ["anger","anticipation","disgust","fear","joy","sadness","surprise","trust"]
 
@@ -166,12 +165,16 @@ def add_emotions(df, text_col="title"):
     Adds emotion proportions per row from NRC EmoLex.
     Columns: emo_anger...emo_trust, emo_dominant
     """
-    if df is None or df.empty: 
+    if df is None or df.empty:
         return df
+    # initialize columns
     for k in EMOTION_KEYS:
-        df[f"emo_{k}"] = 0.0
+        if f"emo_{k}" not in df.columns:
+            df[f"emo_{k}"] = 0.0
+
     dom = []
-    for t in df[text_col].astype(str).fillna(""):
+    # iterate with integer index for at-assignment
+    for idx, t in enumerate(df[text_col].astype(str).fillna("")):
         text = _safe_text(t)
         if not text:
             dom.append("")
@@ -181,7 +184,7 @@ def add_emotions(df, text_col="title"):
         total = sum(raw.values()) or 1
         row = {k: (raw.get(k,0)/total) for k in EMOTION_KEYS}
         for k, v in row.items():
-            df.at[df.index[dom.__len__()], f"emo_{k}"] = v  # index-safe
+            df.at[df.index[idx], f"emo_{k}"] = v
         dom.append(max(row, key=row.get) if row else "")
     df["emo_dominant"] = dom
     return df
@@ -189,8 +192,7 @@ def add_emotions(df, text_col="title"):
 def compute_event_velocity(df, time_col="published"):
     """
     Clusters by hour bucket + topic label and returns 'events_per_hour'
-    as a global velocity signal and per-topic breakdown.
-    Assumes df[time_col] is datetime-like.
+    plus per-topic velocity breakdown.
     """
     if df is None or df.empty:
         return {"events_per_hour": 0.0, "by_topic": {}}
@@ -209,39 +211,36 @@ def compute_event_velocity(df, time_col="published"):
 
 def compute_mobility_anomalies(air_df):
     """
-    Flags simple anomalies: unusually dense flights in a bbox slice.
-    Returns count only (kept light for free hosting).
+    Flags simple anomalies: unusually dense flights in current window.
+    Returns an integer count proxy.
     """
     if air_df is None or air_df.empty:
         return 0
-    # Heuristic: unique ICAO24s in last window vs rolling median (proxy by quantile)
-    q90 = air_df["icao24"].nunique() if "icao24" in air_df.columns else 0
-    # no time series history server-side; use spatial density heuristic
-    if "lon" in air_df.columns and "lat" in air_df.columns:
-        dense = (len(air_df) / max(1, air_df[["lon","lat"]].dropna().shape[0])) > 1.2
-        return int(q90 * (1.5 if dense else 1.0))
-    return int(q90)
+    uniq = air_df["icao24"].nunique() if "icao24" in air_df.columns else 0
+    return int(uniq)
 
 def compute_early_warning(df, gdelt_df=None, air_df=None):
     """
-    Composite Early Warning Index (0–10) from: risk score, negative emotions, velocity, mobility anomalies.
-    Scaled to be stable under free-tier compute.
+    Composite Early Warning Index (0–10) from:
+    - risk score
+    - negative vs positive emotion tilt
+    - event velocity
+    - mobility anomalies
     """
-    if df is None: 
+    if df is None:
         df = pd.DataFrame()
     pool = df
     if gdelt_df is not None and not gdelt_df.empty:
         pool = pd.concat([pool, gdelt_df], ignore_index=True)
 
-    n = len(pool)
-    if n == 0:
+    if pool is None or pool.empty:
         return 0.0
 
-    # Risk: use your existing 'risk_score' if available
+    # Risk
     risk = pool["risk_score"].mean() if "risk_score" in pool.columns else 0.0
     risk_norm = np.clip(risk / 10.0, 0, 1)
 
-    # Emotion tilt: fear+anger+sadness – joy – trust (clamped)
+    # Emotion tilt
     for k in EMOTION_KEYS:
         if f"emo_{k}" not in pool.columns:
             pool[f"emo_{k}"] = 0.0
@@ -251,12 +250,49 @@ def compute_early_warning(df, gdelt_df=None, air_df=None):
 
     # Velocity
     vel = compute_event_velocity(pool).get("events_per_hour", 0.0)
-    vel_norm = np.tanh(vel / 6.0)  # saturates gently
+    vel_norm = np.tanh(vel / 6.0)
 
-    # Mobility anomalies
+    # Mobility
     mob = compute_mobility_anomalies(air_df) if air_df is not None else 0
     mob_norm = np.tanh(mob / 40.0)
 
-    # Blend (weights chosen for stability)
     index_0_10 = 10.0 * (0.35*risk_norm + 0.25*emo_tilt + 0.25*vel_norm + 0.15*mob_norm)
     return round(float(index_0_10), 1)
+
+def extend_kpis_with_intel(kpis, news_df, gdelt_df, air_df):
+    """
+    Extends your existing KPI dict with:
+      - early_warning
+      - event_velocity
+      - mobility_anomalies
+      - emotion mix (averages) + dominant emotion label
+    """
+    if kpis is None:
+        kpis = {}
+
+    # ensure emotion columns exist on both sets
+    news_df = add_emotions(news_df) if (news_df is not None and not news_df.empty) else news_df
+    if gdelt_df is not None and not getattr(gdelt_df, "empty", True):
+        gdelt_df = add_emotions(gdelt_df)
+
+    # Early warning
+    kpis["early_warning"] = compute_early_warning(news_df, gdelt_df, air_df)
+
+    # Velocity
+    from pandas import concat
+    pool = concat([news_df, gdelt_df], ignore_index=True) if (gdelt_df is not None and not gdelt_df.empty) else news_df
+    vel = compute_event_velocity(pool).get("events_per_hour", 0.0) if (pool is not None and not pool.empty) else 0.0
+    kpis["event_velocity"] = round(float(vel), 2)
+
+    # Mobility anomalies
+    kpis["mobility_anomalies"] = compute_mobility_anomalies(air_df)
+
+    # Emotion mix
+    if pool is not None and not pool.empty:
+        for k in EMOTION_KEYS:
+            col = f"emo_{k}"
+            if col in pool.columns:
+                kpis[col] = round(float(pool[col].mean()), 3)
+        if "emo_dominant" in pool.columns and not pool["emo_dominant"].empty:
+            kpis["emo_dominant_top"] = pool["emo_dominant"].value_counts().idxmax()
+    return kpis
