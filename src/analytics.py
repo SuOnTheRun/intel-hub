@@ -173,7 +173,7 @@ def add_emotions(df, text_col="title"):
     Adds emotion proportions per row from NRC EmoLex.
     Columns: emo_anger...emo_trust, emo_dominant
     """
-    if df is None or df.empty:
+        if (df is None) or df.empty or (not _EMO_OK):
         return df
     # initialize columns
     for k in EMOTION_KEYS:
