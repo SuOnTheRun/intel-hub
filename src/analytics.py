@@ -297,20 +297,44 @@ def add_emotions(df, text_col="title"):
     return df
 
 def compute_event_velocity(df, time_col="published"):
+    """
+    Returns {'events_per_hour': float, 'by_topic': {topic: float}}.
+    Robust to missing/varied timestamp columns and bad values.
+    """
     if df is None or df.empty:
         return {"events_per_hour": 0.0, "by_topic": {}}
+
+    # 1) pick the best available time column
+    candidates = [time_col, "published", "published_at", "date", "datetime", "timestamp", "time", "ts"]
+    col = next((c for c in candidates if c in df.columns), None)
+    if col is None:
+        return {"events_per_hour": 0.0, "by_topic": {}}
+
     s = df.copy()
-    try:
-        s[time_col] = pd.to_datetime(s[time_col])
-    except Exception:
-        pass
-    s["hour_bucket"] = s[time_col].dt.floor("H")
+
+    # 2) force to datetime, coerce bad rows to NaT, keep only valid
+    s[col] = pd.to_datetime(s[col], errors="coerce", utc=True)
+    s = s.dropna(subset=[col])
+    if s.empty:
+        return {"events_per_hour": 0.0, "by_topic": {}}
+
+    # 3) hourly bucket
+    s["hour_bucket"] = s[col].dt.floor("H")
+
+    # 4) global velocity over last 24 buckets (or all if fewer)
     by_hour = s.groupby("hour_bucket").size().sort_index()
-    events_per_hour = by_hour.tail(24).mean() if len(by_hour) else 0.0
+    window = by_hour.tail(24)
+    events_per_hour = window.mean() if len(window) else float(by_hour.mean())
+
+    # 5) per-topic velocity (if topic exists)
     by_topic = {}
     if "topic" in s.columns:
-        by_topic = s.groupby(["hour_bucket","topic"]).size().unstack(fill_value=0).tail(24).mean().to_dict()
+        topic_hour = s.groupby(["hour_bucket", "topic"]).size().unstack(fill_value=0).sort_index()
+        topic_window = topic_hour.tail(24) if len(topic_hour) else topic_hour
+        by_topic = topic_window.mean().to_dict() if not topic_window.empty else {}
+
     return {"events_per_hour": float(events_per_hour), "by_topic": {k: float(v) for k, v in by_topic.items()}}
+
 
 def compute_mobility_anomalies(air_df):
     if air_df is None or air_df.empty:
