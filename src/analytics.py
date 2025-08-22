@@ -149,7 +149,15 @@ def build_social_listening_panels(news_df: pd.DataFrame, reddit_df: pd.DataFrame
 
 
 # ========= EMOTION, VELOCITY, EARLY-WARNING UTILITIES =========
-from nrclex import NRCLex
+# Safe import: do not crash if pip didn't install nrclex yet
+try:
+    from nrclex import NRCLex  # pip package name: nrclex
+    _EMO_OK = True
+except Exception:
+    _EMO_OK = False
+    class NRCLex:  # no-op fallback so the app keeps running
+        def __init__(self, text):
+            self.raw_emotion_scores = {}
 import numpy as np
 import pandas as pd
 
