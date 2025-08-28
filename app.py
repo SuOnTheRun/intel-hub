@@ -13,7 +13,8 @@ from src.ui import (
     render_header, render_kpi_row, render_event_cards, render_news_table, render_markets,
     render_trends, render_reddit, render_regions_grid, render_feed_panel,
     # NEW ↓
-    render_alert_strip, render_reliability_panel
+    render_alert_strip, render_reliability_panel, render_alert_strip, render_reliability_panel, render_section_header, begin_card, end_card, render_top_events_split
+
 )
 
 
@@ -133,20 +134,50 @@ tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.
 
 
 # ---------------- Tab bodies ----------------
-# NEW: alert strip first
-render_alert_strip(alerts)
 
 with tab_overview:
-    from src.ui import render_kpi_row_intel, render_event_cards_with_emotion
+    # 1) Alerts (strip)
+    render_alert_strip(alerts)
+
+    # 2) Scorecard (highlighted box)
+    render_section_header(
+        "Scorecard",
+        "Early Warning Index blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies; higher means more concerning."
+    )
+    begin_card()
+    from src.ui import render_kpi_row_intel  # safe if already imported elsewhere
     render_kpi_row_intel(kpis)
+    end_card()
 
-    top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
-    render_event_cards_with_emotion(top_events, "Top Events", n=12)
+    # 3) Top events (table + one sentiment chart)
+    render_top_events_split(
+        pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered,
+        n=20, title="Top Events"
+    )
 
-    st.markdown("##### Global Intelligence Map")
-    from src.presets import region_center
-    from src.maps import render_global_gdelt_map
-    render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
+    # 4) Risk / Mobility Heat (map with graceful fallback)
+    render_section_header(
+        "Risk / Mobility Heat",
+        "Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density for situational awareness."
+    )
+    has_gdelt_map = (not gdelt_df.empty) and {"lat","lon"}.issubset(set(gdelt_df.columns))
+    if has_gdelt_map:
+        from src.presets import region_center
+        from src.maps import render_global_gdelt_map
+        render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
+    elif air_df is not None and not air_df.empty:
+        from src.presets import region_center
+        st.caption("GDELT map unavailable; showing air-traffic fallback for the region.")
+        render_global_air_map(air_df, center=region_center(region), zoom=4)
+    else:
+        st.info("No geocoded events or air-traffic data available for the selected window.")
+
+    # 5) Signal reliability (chips + table)
+    render_section_header(
+        "Signal Reliability",
+        "Counts and last-update age for each feed (minutes since latest timestamp)."
+    )
+    render_reliability_panel(freshness, src_counts)
 
 with tab_regions:
     render_regions_grid(
