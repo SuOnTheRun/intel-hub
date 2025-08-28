@@ -2,29 +2,12 @@ import os
 import streamlit as st
 import pandas as pd
 
-
-from src.analytics import (
-    enrich_news_with_topics_regions, aggregate_kpis, build_social_listening_panels,
-    add_risk_scores, filter_by_controls, TOPIC_LIST, cluster_headlines,
-    add_emotions, extend_kpis_with_intel,
-    # NEW ↓
-    compute_data_freshness, source_breakdown, detect_overview_alerts
-)
-from src.ui import (
-    render_header, render_markets, render_trends, render_reddit,
-    render_regions_grid, render_feed_panel,
-    # NEW helpers used below
-    render_kpi_row_intel, render_top_events_split,
-    render_section_header, render_alert_strip, render_reliability_panel
-)
-
-
 from src.theming import apply_page_style
 from src.presets import region_names, region_bbox, region_center, region_keywords
 from src.analytics import (
     enrich_news_with_topics_regions, aggregate_kpis, build_social_listening_panels,
     add_risk_scores, filter_by_controls, TOPIC_LIST, cluster_headlines,
-    add_emotions, extend_kpis_with_intel
+    add_emotions, extend_kpis_with_intel,
 )
 from src.data_sources import (
     fetch_market_snapshot, fetch_rss_bundle, fetch_newsapi_bundle, merge_news_and_dedupe,
@@ -33,196 +16,14 @@ from src.data_sources import (
 )
 from src.maps import render_global_air_map, render_tracks_map
 from src.ui import (
-    render_header, render_kpi_row, render_event_cards, render_news_table, render_markets,
-    render_trends, render_reddit, render_regions_grid, render_feed_panel,
+    render_header, render_markets, render_trends, render_reddit,
+    render_regions_grid, render_feed_panel,
+    render_kpi_row_intel, render_top_events_split,
+    render_section_header, render_alert_strip, render_reliability_panel,
+    # NEW: morning-briefing UI
+    render_pulse_row, render_emotion_lens, render_topics_lens, render_psychology_console,
 )
 from src.exporters import download_buttons
-
-# ---------------- Page setup ----------------
-st.set_page_config(page_title="Strategic Intelligence War Room", layout="wide", initial_sidebar_state="collapsed")
-apply_page_style()
-render_header()
-
-# ---------------- Sidebar Filters ----------------
-with st.sidebar:
-    st.markdown("#### Filters")
-    rnames = region_names()
-    default_idx = rnames.index("Indo-Pacific") if "Indo-Pacific" in rnames else 0
-    region = st.selectbox("Region preset", options=rnames, index=default_idx)
-    hours = st.slider("Time window (hours)", min_value=6, max_value=96, value=48, step=6)
-    topics = st.multiselect("Topics", options=TOPIC_LIST, default=["Security","Mobility","Markets","Elections"])
-    tickers = st.text_input(
-        "Tickers (comma-separated)",
-        value=os.getenv("DEFAULT_TICKERS","RELIANCE.NS,TCS.NS,INFY.NS,^NSEI,TSLA,AAPL,MSFT")
-    )
-    rss_bundle = st.selectbox("RSS bundle", options=["world_major","business_tech"], index=0)
-    widen_air = st.checkbox("Fallback to global air traffic when region is quiet", value=True)
-    st.caption("APIs via env vars: NEWSAPI_KEY · POLYGON_ACCESS_KEY · REDDIT_* · OPENSKY_*")
-
-# ---------------- Data Pulls ----------------
-tickers_list = [t.strip() for t in tickers.split(",") if t.strip()]
-markets_df = fetch_market_snapshot(tickers_list)
-
-# Query strategy: region term + topics + region keywords (expands recall)
-region_term = region
-queries = [region_term] + topics + region_keywords(region)
-rss_df = fetch_rss_bundle(rss_bundle)
-newsapi_df = fetch_newsapi_bundle(queries)
-news_df_raw = merge_news_and_dedupe(rss_df, newsapi_df)
-
-# Enrich + risk + filter + cluster (auto-widen inside filter)
-news_df = enrich_news_with_topics_regions(news_df_raw)
-news_df = add_risk_scores(news_df)
-news_df = filter_by_controls(news_df, region=region, topics=topics, hours=hours)
-clustered = cluster_headlines(news_df, sim=72)
-
-gdelt_df = fetch_gdelt_events(queries)
-if not gdelt_df.empty:
-    gdelt_df = enrich_news_with_topics_regions(gdelt_df)
-    gdelt_df = add_risk_scores(gdelt_df)
-    gdelt_df = filter_by_controls(gdelt_df, region=region, topics=topics, hours=hours)
-    clustered_gdelt = cluster_headlines(gdelt_df, sim=72)
-else:
-    clustered_gdelt = pd.DataFrame()
-
-# --- Emotion enrichment (row-level) ---
-news_df = add_emotions(news_df)
-if not gdelt_df.empty:
-    gdelt_df = add_emotions(gdelt_df)
-
-trends_df = fetch_google_trends(topics)
-bbox = region_bbox(region)
-try:
-    air_df = fetch_opensky_air_traffic(bbox=bbox, allow_global_fallback=widen_air)
-except Exception:
-    air_df = pd.DataFrame()
-
-reddit_df = fetch_reddit_posts_if_configured(["economy","geopolitics","advertising","marketing"])
-social_panels = build_social_listening_panels(
-    pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
-    reddit_df
-)
-
-# ---------------- KPIs ----------------
-kpis = aggregate_kpis(
-    pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
-    gdelt_df,
-    air_df
-)
-kpis = extend_kpis_with_intel(kpis, news_df, gdelt_df if not gdelt_df.empty else None, air_df)
-
-# Action bar — neatly grouped & centered
-st.markdown(
-    '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; margin:10px 0 6px;">',
-    unsafe_allow_html=True
-)
-# Action bar — centered with columns (robust, no HTML)
-_, center, _ = st.columns([1, 3, 1])
-with center:
-    download_buttons(
-        news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df,
-        air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
-    )
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-
-# --- Reliability & Alerts ---
-freshness = compute_data_freshness(
-    news=news_df,
-    gdelt=gdelt_df if not gdelt_df.empty else pd.DataFrame(),
-    air=air_df,
-    trends=trends_df,
-    reddit=reddit_df
-)
-src_counts = source_breakdown(pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df)
-alerts = detect_overview_alerts(kpis, freshness)
-
-# ---------------- Tabs (must be BEFORE the with-blocks) ----------------
-tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.tabs(
-    ["Overview", "Regional Analysis", "Intelligence Feed", "Movement Tracking", "Markets", "Social Listening"]
-)
-
-# ---------------- Tab bodies ----------------
-with tab_overview:
-    # Alerts (simple examples; adjust thresholds if you like)
-    alerts = []
-    if kpis.get("mobility_anomalies", 0) > 500:
-        alerts.append(f"Mobility anomalies elevated (≈{kpis['mobility_anomalies']})")
-    if kpis.get("early_warning", 0) >= 6:
-        alerts.append(f"Early Warning Index high ({kpis['early_warning']})")
-    render_alert_strip(alerts)
-
-    # Strategic Highlights (formerly Scorecard)
-    render_section_header(
-        "Strategic Highlights",
-        "* Early Warning Index blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies; higher means more concerning."
-    )
-    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
-    render_kpi_row_intel(kpis)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Top Events + HUMINT emotions
-    top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
-    render_top_events_split(top_events, n=20, title="Top Events")
-
-    # Risk / Mobility Heat (GDELT if available, else air-traffic density)
-    render_section_header(
-        "Risk / Mobility Heat",
-        "* Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density for situational awareness."
-    )
-    from src.presets import region_center
-    from src.maps import render_global_gdelt_map, render_global_air_map
-    if not gdelt_df.empty and {"lat", "lon"}.issubset(set(gdelt_df.columns)):
-        render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
-    else:
-        render_global_air_map(air_df, center=region_center(region), zoom=4)
-
-    # Signal Reliability
-    render_section_header(
-        "Signal Reliability",
-        "* Counts and last-update age for each feed (minutes since latest timestamp)."
-    )
-    freshness = {"news": None, "gdelt": None, "air": None, "trends": None, "reddit": None}
-    src_counts = {
-        "news": len(news_df) if news_df is not None else 0,
-        "gdelt": len(gdelt_df) if gdelt_df is not None else 0,
-        "air": len(air_df) if air_df is not None else 0,
-        "trends": len(trends_df) if trends_df is not None else 0,
-        "reddit": len(reddit_df) if reddit_df is not None else 0,
-    }
-    render_reliability_panel(freshness, src_counts, col_label="Feed")
-
-with tab_regions:
-    render_regions_grid(
-        pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
-        expanded=True
-    )
-
-with tab_feed:
-    render_feed_panel(news_df, gdelt_df)
-
-with tab_mobility:
-    st.markdown("##### Live Air Traffic")
-    from src.presets import region_center
-    render_global_air_map(air_df, center=region_center(region), zoom=5)
-    if not air_df.empty and "icao24" in air_df.columns:
-        icao24s = sorted(air_df["icao24"].dropna().unique().tolist())
-        if icao24s:
-            selected = st.selectbox("Select ICAO24 for recent track (requires OpenSky auth)", icao24s)
-            if selected:
-                tdf = fetch_opensky_tracks_for_icao24(selected)
-                render_tracks_map(tdf)
-
-with tab_markets:
-    render_markets(markets_df)
-    render_trends(trends_df)
-
-with tab_social:
-    render_reddit(reddit_df)
-    for block in social_panels:
-        st.markdown(f"#### {block['title']}")
-        st.dataframe(block["table"], use_container_width=True, height=360)
 
 # ========= MORNING BRIEFING METRICS & PSYCHOLOGY LEXICONS =========
 import re
@@ -377,4 +178,221 @@ def psychology_buckets(df, text_col="title"):
         n += 1
     if n == 0: n = 1
     return {k: round(v / n, 3) for k,v in agg.items()}
+
+
+
+# ---------------- Page setup ----------------
+st.set_page_config(page_title="Strategic Intelligence War Room", layout="wide", initial_sidebar_state="collapsed")
+apply_page_style()
+render_header()
+
+# ---------------- Sidebar Filters ----------------
+with st.sidebar:
+    st.markdown("#### Filters")
+    rnames = region_names()
+    default_idx = rnames.index("Indo-Pacific") if "Indo-Pacific" in rnames else 0
+    region = st.selectbox("Region preset", options=rnames, index=default_idx)
+    hours = st.slider("Time window (hours)", min_value=6, max_value=96, value=48, step=6)
+    topics = st.multiselect("Topics", options=TOPIC_LIST, default=["Security","Mobility","Markets","Elections"])
+    tickers = st.text_input(
+        "Tickers (comma-separated)",
+        value=os.getenv("DEFAULT_TICKERS","RELIANCE.NS,TCS.NS,INFY.NS,^NSEI,TSLA,AAPL,MSFT")
+    )
+    rss_bundle = st.selectbox("RSS bundle", options=["world_major","business_tech"], index=0)
+    widen_air = st.checkbox("Fallback to global air traffic when region is quiet", value=True)
+    st.caption("APIs via env vars: NEWSAPI_KEY · POLYGON_ACCESS_KEY · REDDIT_* · OPENSKY_*")
+
+# ---------------- Data Pulls ----------------
+tickers_list = [t.strip() for t in tickers.split(",") if t.strip()]
+markets_df = fetch_market_snapshot(tickers_list)
+
+# Query strategy: region term + topics + region keywords (expands recall)
+region_term = region
+queries = [region_term] + topics + region_keywords(region)
+rss_df = fetch_rss_bundle(rss_bundle)
+newsapi_df = fetch_newsapi_bundle(queries)
+news_df_raw = merge_news_and_dedupe(rss_df, newsapi_df)
+
+# Enrich + risk + filter + cluster (auto-widen inside filter)
+news_df = enrich_news_with_topics_regions(news_df_raw)
+news_df = add_risk_scores(news_df)
+news_df = filter_by_controls(news_df, region=region, topics=topics, hours=hours)
+clustered = cluster_headlines(news_df, sim=72)
+
+gdelt_df = fetch_gdelt_events(queries)
+if not gdelt_df.empty:
+    gdelt_df = enrich_news_with_topics_regions(gdelt_df)
+    gdelt_df = add_risk_scores(gdelt_df)
+    gdelt_df = filter_by_controls(gdelt_df, region=region, topics=topics, hours=hours)
+    clustered_gdelt = cluster_headlines(gdelt_df, sim=72)
+else:
+    clustered_gdelt = pd.DataFrame()
+
+# --- Emotion enrichment (row-level) ---
+news_df = add_emotions(news_df)
+if not gdelt_df.empty:
+    gdelt_df = add_emotions(gdelt_df)
+
+trends_df = fetch_google_trends(topics)
+bbox = region_bbox(region)
+try:
+    air_df = fetch_opensky_air_traffic(bbox=bbox, allow_global_fallback=widen_air)
+except Exception:
+    air_df = pd.DataFrame()
+
+reddit_df = fetch_reddit_posts_if_configured(["economy","geopolitics","advertising","marketing"])
+social_panels = build_social_listening_panels(
+    pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
+    reddit_df
+)
+
+# ---------------- KPIs ----------------
+kpis = aggregate_kpis(
+    pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
+    gdelt_df,
+    air_df
+)
+kpis = extend_kpis_with_intel(kpis, news_df, gdelt_df if not gdelt_df.empty else None, air_df)
+
+# Action bar — centered (no raw HTML)
+_, center, _ = st.columns([1, 3, 1])
+with center:
+    download_buttons(
+        news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df,
+        air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
+    )
+
+
+# Combined pool for overview analytics
+event_pool = pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df
+
+# Morning pulse (last 24h vs previous 24h)
+pulse = {
+    "risk":       global_risk_index_delta(event_pool),
+    "velocity":   event_velocity_delta(event_pool),
+    "psych":      psychological_state_index_delta(event_pool),
+    "friction":   engagement_friction_delta(reddit_df),
+}
+
+
+# ---------------- Tabs (must be BEFORE the with-blocks) ----------------
+tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.tabs(
+    ["Overview", "Regional Analysis", "Intelligence Feed", "Movement Tracking", "Markets", "Social Listening"]
+)
+
+# ---------------- Tab bodies ----------------
+with tab_overview:
+    # Alerts (simple examples; adjust thresholds if you like)
+    alerts = []
+    if kpis.get("mobility_anomalies", 0) > 500:
+        alerts.append(f"Mobility anomalies elevated (≈{kpis['mobility_anomalies']})")
+    if kpis.get("early_warning", 0) >= 6:
+        alerts.append(f"Early Warning Index high ({kpis['early_warning']})")
+    render_alert_strip(alerts)
+
+     # Morning Pulse row (click cards to expand)
+    render_pulse_row(pulse)
+
+    # Strategic Highlights (formerly Scorecard)
+    render_section_header(
+        "Strategic Highlights",
+        "* Early Warning Index blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies; higher means more concerning."
+    )
+    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
+    render_kpi_row_intel(kpis)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Top Events + HUMINT emotions
+    top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
+    render_top_events_split(top_events, n=20, title="Top Events")
+
+    # Risk / Mobility Heat (GDELT if available, else air-traffic density)
+    render_section_header(
+        "Risk / Mobility Heat",
+        "* Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density for situational awareness."
+    )
+
+    # Emotion & Psychology Console
+    render_emotion_lens(event_pool)
+    render_topics_lens(event_pool)
+    render_psychology_console(event_pool)
+
+    from src.presets import region_center
+    from src.maps import render_global_gdelt_map, render_global_air_map
+    if not gdelt_df.empty and {"lat", "lon"}.issubset(set(gdelt_df.columns)):
+        render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
+    else:
+        render_global_air_map(air_df, center=region_center(region), zoom=4)
+    # Signal Reliability
+    render_section_header(
+        "Signal Reliability",
+        "* Counts and last-update age for each feed (minutes since latest timestamp)."
+    )
+
+    def _last_ts_age(df):
+        if df is None or getattr(df, "empty", True):
+            return None, None
+        tcol = next((c for c in ["published","published_at","date","datetime","timestamp","time","ts","created_utc","created","created_at"] if c in df.columns), None)
+        if not tcol:
+            return None, None
+        s = pd.to_datetime(df[tcol], errors="coerce", utc=True).dropna()
+        if s.empty:
+            return None, None
+        last = s.max()
+        age = (pd.Timestamp.utcnow() - last).total_seconds() / 60.0
+        return last, round(age, 1)
+
+    f_news   = _last_ts_age(news_df)
+    f_gdelt  = _last_ts_age(gdelt_df)
+    f_reddit = _last_ts_age(reddit_df)
+
+    freshness = {
+        "news":   {"count": len(news_df)   if news_df   is not None else 0, "last_ts": f_news[0],   "age_min": f_news[1]},
+        "gdelt":  {"count": len(gdelt_df)  if gdelt_df  is not None else 0, "last_ts": f_gdelt[0],  "age_min": f_gdelt[1]},
+        "air":    {"count": len(air_df)    if air_df    is not None else 0, "last_ts": None,        "age_min": None},
+        "trends": {"count": len(trends_df) if trends_df is not None else 0, "last_ts": None,        "age_min": None},
+        "reddit": {"count": len(reddit_df) if reddit_df is not None else 0, "last_ts": f_reddit[0], "age_min": f_reddit[1]},
+    }
+
+    src_counts = {
+        "news": len(news_df) if news_df is not None else 0,
+        "gdelt": len(gdelt_df) if gdelt_df is not None else 0,
+        "air": len(air_df) if air_df is not None else 0,
+        "trends": len(trends_df) if trends_df is not None else 0,
+        "reddit": len(reddit_df) if reddit_df is not None else 0,
+    }
+
+    render_reliability_panel(freshness, src_counts, col_label="Feed")
+
+
+with tab_regions:
+    render_regions_grid(
+        pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df,
+        expanded=True
+    )
+
+with tab_feed:
+    render_feed_panel(news_df, gdelt_df)
+
+with tab_mobility:
+    st.markdown("##### Live Air Traffic")
+    from src.presets import region_center
+    render_global_air_map(air_df, center=region_center(region), zoom=5)
+    if not air_df.empty and "icao24" in air_df.columns:
+        icao24s = sorted(air_df["icao24"].dropna().unique().tolist())
+        if icao24s:
+            selected = st.selectbox("Select ICAO24 for recent track (requires OpenSky auth)", icao24s)
+            if selected:
+                tdf = fetch_opensky_tracks_for_icao24(selected)
+                render_tracks_map(tdf)
+
+with tab_markets:
+    render_markets(markets_df)
+    render_trends(trends_df)
+
+with tab_social:
+    render_reddit(reddit_df)
+    for block in social_panels:
+        st.markdown(f"#### {block['title']}")
+        st.dataframe(block["table"], use_container_width=True, height=360)
 
