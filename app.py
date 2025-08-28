@@ -223,3 +223,158 @@ with tab_social:
     for block in social_panels:
         st.markdown(f"#### {block['title']}")
         st.dataframe(block["table"], use_container_width=True, height=360)
+
+# ========= MORNING BRIEFING METRICS & PSYCHOLOGY LEXICONS =========
+import re
+import pandas as pd
+import numpy as np
+
+def _pick_time_col(df):
+    if df is None or df.empty:
+        return None
+    for c in ["published","published_at","date","datetime","timestamp","time","ts","created_utc","created","created_at"]:
+        if c in df.columns:
+            return c
+    return None
+
+def _coerce_time(df, col):
+    s = df.copy()
+    s[col] = pd.to_datetime(s[col], errors="coerce", utc=True)
+    return s.dropna(subset=[col])
+
+def _split_24h_windows(df, tcol):
+    """Return two dataframes: last_24h, prev_24h (rolling back from the max timestamp)."""
+    if df is None or df.empty or tcol is None:
+        return pd.DataFrame(), pd.DataFrame()
+    s = _coerce_time(df, tcol)
+    if s.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    end = s[tcol].max()
+    start_last = end - pd.Timedelta(hours=24)
+    start_prev = start_last - pd.Timedelta(hours=24)
+    last = s[(s[tcol] > start_last) & (s[tcol] <= end)]
+    prev = s[(s[tcol] > start_prev) & (s[tcol] <= start_last)]
+    return last, prev
+
+def global_risk_index_delta(df):
+    """
+    Mean risk (0–10) last 24h vs prior 24h.
+    Returns dict: {'current': float, 'delta': float}
+    """
+    tcol = _pick_time_col(df)
+    last, prev = _split_24h_windows(df, tcol)
+    cur = float(last["risk_score"].mean()) if ("risk_score" in last.columns and not last.empty) else 0.0
+    base = float(prev["risk_score"].mean()) if ("risk_score" in prev.columns and not prev.empty) else 0.0
+    return {"current": round(cur, 2), "delta": round(cur - base, 2)}
+
+def event_velocity_delta(df):
+    """
+    Events/hour in last 24h vs prior 24h.
+    """
+    tcol = _pick_time_col(df)
+    last, prev = _split_24h_windows(df, tcol)
+    def _vel(x):
+        if x is None or x.empty:
+            return 0.0
+        x = x.copy()
+        x["hour_bucket"] = pd.to_datetime(x[tcol], utc=True, errors="coerce").dt.floor("H")
+        return float(x.groupby("hour_bucket").size().mean()) if not x.empty else 0.0
+    cur = _vel(last)
+    base = _vel(prev)
+    return {"current": round(cur, 2), "delta": round(cur - base, 2)}
+
+# --- Emotion / psychology indices (uses your existing emotion columns) ---
+_NEG = ["emo_fear","emo_anger","emo_sadness"]
+_POS = ["emo_joy","emo_trust"]
+
+def psychological_state_index_delta(df):
+    """
+    Signed index = (neg - pos); last 24h vs prior 24h.
+    Also returns the dominant emotion label in last 24h.
+    """
+    tcol = _pick_time_col(df)
+    last, prev = _split_24h_windows(df, tcol)
+    def _tilt(x):
+        if x is None or x.empty:
+            return 0.0
+        for c in _NEG + _POS:
+            if c not in x.columns:
+                x[c] = 0.0
+        neg = float(x[_NEG].mean().mean())
+        pos = float(x[_POS].mean().mean())
+        return float(neg - pos)
+    cur = _tilt(last)
+    base = _tilt(prev)
+    dom = ""
+    if "emo_dominant" in last.columns and not last.empty:
+        try:
+            dom = last["emo_dominant"].value_counts().idxmax()
+        except Exception:
+            dom = ""
+    return {"current": round(cur, 3), "delta": round(cur - base, 3), "dominant": dom}
+
+def engagement_friction_delta(reddit_df):
+    """
+    Reddit-only (real data): friction ~ impressions-to-action proxy.
+    We use score as 'impressions/approval' and comments as 'action'.
+    Friction = score / (comments+1). Higher => more passive; lower => more discussion/action.
+    Returns last 24h vs prior 24h.
+    """
+    if reddit_df is None or getattr(reddit_df, "empty", True):
+        return {"current": 0.0, "delta": 0.0}
+    tcol = _pick_time_col(reddit_df)
+    last, prev = _split_24h_windows(reddit_df, tcol)
+    def _fric(x):
+        if x is None or x.empty:
+            return 0.0
+        s = x.copy()
+        score = s["score"] if "score" in s.columns else 0
+        comments = s["num_comments"] if "num_comments" in s.columns else 0
+        num = pd.to_numeric(score, errors="coerce").fillna(0.0)
+        den = (pd.to_numeric(comments, errors="coerce").fillna(0.0) + 1.0)
+        return float((num / den).mean())
+    cur = _fric(last)
+    base = _fric(prev)
+    return {"current": round(cur, 3), "delta": round(cur - base, 3)}
+
+# --- Psychology console (validation vs action vs next step) ---
+_VAL_WORDS = set("""
+why because justify belief identity reassure values loyalty safe stability confidence trust hope dignity
+""".split())
+_ACT_WORDS = set("""
+how steps plan build deploy execute operate apply guide procedure instruction training strategy
+""".split())
+_NEXT_WORDS = set("""
+next join register sign vote donate contact attend enlist apply buy subscribe commit adopt
+""".split())
+_RESIST_WORDS = set("""
+can't cannot wont won't block ban delay refuse resist oppose sanction barrier shortage constraint cap
+""".replace("’","'").split())
+
+_token_re_psy = re.compile(r"[A-Za-z][A-Za-z\-']+")
+
+def _count_psych_buckets(text):
+    t = str(text or "").lower()
+    counts = {"validation":0, "action":0, "next_step":0, "resistance":0}
+    for tok in _token_re_psy.findall(t):
+        if tok in _VAL_WORDS: counts["validation"] += 1
+        if tok in _ACT_WORDS: counts["action"] += 1
+        if tok in _NEXT_WORDS: counts["next_step"] += 1
+        if tok in _RESIST_WORDS: counts["resistance"] += 1
+    return counts
+
+def psychology_buckets(df, text_col="title"):
+    """
+    Returns dict of mean rates per bucket using headlines.
+    """
+    if df is None or df.empty:
+        return {"validation":0.0,"action":0.0,"next_step":0.0,"resistance":0.0}
+    agg = {"validation":0, "action":0, "next_step":0, "resistance":0}
+    n = 0
+    for t in df[text_col].astype(str).fillna(""):
+        c = _count_psych_buckets(t)
+        for k in agg: agg[k] += c[k]
+        n += 1
+    if n == 0: n = 1
+    return {k: round(v / n, 3) for k,v in agg.items()}
+
