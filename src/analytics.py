@@ -386,3 +386,105 @@ def extend_kpis_with_intel(kpis, news_df, gdelt_df, air_df):
         if "emo_dominant" in pool.columns and not pool["emo_dominant"].empty:
             kpis["emo_dominant_top"] = pool["emo_dominant"].value_counts().idxmax()
     return kpis
+
+# ========== OVERVIEW SIGNALS: ALERTS, FRESHNESS, BREAKDOWNS ==========
+
+import pandas as pd
+import numpy as np
+
+def _pick_time_col(df):
+    """Best-effort timestamp column selection."""
+    candidates = ["published", "published_at", "date", "datetime", "timestamp", "time", "ts"]
+    return next((c for c in candidates if c in df.columns), None)
+
+def compute_data_freshness(**frames):
+    """
+    Returns a dict {name: {"last_ts": pd.Timestamp|None, "age_min": float|None, "count": int}}
+    where name is keys like news='news_df', gdelt='gdelt_df', air='air_df', etc.
+    """
+    out = {}
+    now = pd.Timestamp.utcnow()
+    for name, df in frames.items():
+        if df is None or getattr(df, "empty", True):
+            out[name] = {"last_ts": None, "age_min": None, "count": 0}
+            continue
+        col = _pick_time_col(df)
+        if col is None:
+            # allow OpenSky frames with 'time' in seconds since epoch
+            if "time" in df.columns and np.issubdtype(df["time"].dtype, np.number):
+                ts = pd.to_datetime(int(df["time"].max()), unit="s", utc=True, errors="coerce")
+            else:
+                out[name] = {"last_ts": None, "age_min": None, "count": int(len(df))}
+                continue
+        else:
+            s = pd.to_datetime(df[col], errors="coerce", utc=True)
+            ts = s.max()
+
+        if pd.isna(ts):
+            out[name] = {"last_ts": None, "age_min": None, "count": int(len(df))}
+        else:
+            age = (now - ts).total_seconds() / 60.0
+            out[name] = {"last_ts": ts, "age_min": round(float(age), 1), "count": int(len(df))}
+    return out
+
+def source_breakdown(df):
+    """
+    Simple count by 'source' if present; else by 'provider'/'site'/'domain' if present.
+    """
+    if df is None or getattr(df, "empty", True):
+        return {}
+    for c in ["source", "provider", "site", "domain"]:
+        if c in df.columns:
+            vc = df[c].astype(str).value_counts().head(10)
+            return {k: int(v) for k, v in vc.items()}
+    return {}
+
+def detect_overview_alerts(kpis, freshness, thresholds=None):
+    """
+    Turn KPI levels into human-readable alerts for the Overview page.
+    thresholds: dict override
+    Returns list[str].
+    """
+    thr = {
+        "early_warning_hi": 7.0,
+        "velocity_hi": 3.0,          # events/hour
+        "mobility_hi": 200,          # unique ICAO24 proxy
+        "market_drop": -1.5,         # % day change (if available in your markets_df)
+        "data_stale_min": 90.0,      # any source older than this
+    }
+    if isinstance(thresholds, dict):
+        thr.update(thresholds)
+
+    alerts = []
+
+    ew = float(kpis.get("early_warning", 0.0) or 0.0)
+    if ew >= thr["early_warning_hi"]:
+        alerts.append(f"Early Warning Index elevated at {ew}")
+
+    vel = float(kpis.get("event_velocity", 0.0) or 0.0)
+    if vel >= thr["velocity_hi"]:
+        alerts.append(f"Event velocity high ({vel} events/hr)")
+
+    mob = float(kpis.get("mobility_anomalies", 0.0) or 0.0)
+    if mob >= thr["mobility_hi"]:
+        alerts.append(f"Mobility anomalies elevated (≈{int(mob)})")
+
+    # Freshness alerts
+    for name, meta in (freshness or {}).items():
+        age = meta.get("age_min")
+        if age is not None and age > thr["data_stale_min"]:
+            alerts.append(f"{name.capitalize()} feed stale ({int(age)} min old)")
+
+    # Markets downside if your markets block computes it; leave safe if absent
+    mdd = kpis.get("markets_day_change_pct")  # ensure your markets aggregator sets this if you want this alert
+    try:
+        if mdd is not None and float(mdd) <= thr["market_drop"]:
+            alerts.append(f"Markets risk: {float(mdd):+.1f}% daily move")
+    except Exception:
+        pass
+
+    # If nothing triggered, show a calm status
+    if not alerts:
+        alerts.append("No critical alerts in the selected window")
+
+    return alerts
