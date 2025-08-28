@@ -195,16 +195,29 @@ with st.sidebar:
     rnames = region_names()
     default_idx = rnames.index("Indo-Pacific") if "Indo-Pacific" in rnames else 0
 
-    # add unique keys so Streamlit doesn’t collide
     region = st.selectbox(
         "Region preset", options=rnames, index=default_idx, key="side_region_preset"
     )
-    ...
+    hours = st.slider(
+        "Time window (hours)", min_value=6, max_value=96, value=48, step=6, key="side_hours"
+    )
+    topics = st.multiselect(
+        "Topics", options=TOPIC_LIST,
+        default=["Security","Mobility","Markets","Elections"], key="side_topics"
+    )
+    tickers = st.text_input(
+        "Tickers (comma-separated)",
+        value=os.getenv("DEFAULT_TICKERS","RELIANCE.NS,TCS.NS,INFY.NS,^NSEI,TSLA,AAPL,MSFT"),
+        key="side_tickers"
+    )
     rss_bundle = st.selectbox(
         "RSS bundle", options=["world_major","business_tech"], index=0, key="side_rss_bundle"
     )
-    widen_air = st.checkbox("Fallback to global air traffic when region is quiet", value=True)
+    widen_air = st.checkbox(
+        "Fallback to global air traffic when region is quiet", value=True, key="side_widen_air"
+    )
     st.caption("APIs via env vars: NEWSAPI_KEY · POLYGON_ACCESS_KEY · REDDIT_* · OPENSKY_*")
+
 
 # ---------------- Data Pulls ----------------
 tickers_list = [t.strip() for t in tickers.split(",") if t.strip()]
@@ -365,17 +378,19 @@ with tab_mobility:
     st.markdown("##### Live Air Traffic")
     from src.presets import region_center
     render_global_air_map(air_df, center=region_center(region), zoom=5)
+
     if not air_df.empty and "icao24" in air_df.columns:
         icao24s = sorted(air_df["icao24"].dropna().unique().tolist())
         if icao24s:
-           selected = st.selectbox(
-    "Select ICAO24 for recent track (requires OpenSky auth)",
-    icao24s,
-    key="mobility_icao24_select"
-)
+            selected = st.selectbox(
+                "Select ICAO24 for recent track (requires OpenSky auth)",
+                icao24s,
+                key="mobility_icao24_select",
+            )
             if selected:
                 tdf = fetch_opensky_tracks_for_icao24(selected)
                 render_tracks_map(tdf)
+
 
 with tab_markets:
     render_markets(markets_df)
