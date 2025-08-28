@@ -23,32 +23,42 @@ def _make_pdf_brief(kpis: dict, title: str = "Strategic Intelligence Brief") -> 
     c.showPage(); c.save()
     return buf.getvalue()
 
-def download_buttons(news_df=None, gdelt_df=None, markets_df=None, air_df=None, trends_df=None, reddit_df=None):
-    # Minimal KPI snapshot (computed in app, available via st.session_state if needed)
-    kpis = {
-        "total_reports": 0 if news_df is None else len(news_df),
-        "gdelt_reports": 0 if gdelt_df is None else len(gdelt_df),
-        "markets_rows": 0 if markets_df is None else len(markets_df),
-        "aircraft_rows": 0 if air_df is None else len(air_df),
-    }
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
-    with col1:
-        if news_df is not None and not news_df.empty:
-            st.download_button("Download News CSV", _df_to_csv_bytes(news_df), "news.csv", mime="text/csv")
-    with col2:
-        if gdelt_df is not None and not gdelt_df.empty:
-            st.download_button("Download GDELT CSV", _df_to_csv_bytes(gdelt_df), "gdelt.csv", mime="text/csv")
-    with col3:
-        if markets_df is not None and not markets_df.empty:
-            st.download_button("Download Markets CSV", _df_to_csv_bytes(markets_df), "markets.csv", mime="text/csv")
-    with col4:
-        if air_df is not None and not air_df.empty:
-            st.download_button("Download Air Traffic CSV", _df_to_csv_bytes(air_df), "air_traffic.csv", mime="text/csv")
-    with col5:
-        if trends_df is not None and not trends_df.empty:
-            st.download_button("Download Trends CSV", _df_to_csv_bytes(trends_df), "trends.csv", mime="text/csv")
-    with col6:
-        if reddit_df is not None and not reddit_df.empty:
-            st.download_button("Download Reddit CSV", _df_to_csv_bytes(reddit_df), "reddit.csv", mime="text/csv")
-    with col7:
-        st.download_button("Export PDF Brief", _make_pdf_brief(kpis), "intelligence_brief.pdf", mime="application/pdf")
+import io
+import pandas as pd
+import streamlit as st
+
+def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    if df is None or getattr(df, "empty", True):
+        return b""
+    buf = io.StringIO()
+    df.to_csv(buf, index=False)
+    return buf.getvalue().encode("utf-8")
+
+def download_buttons(
+    news_df=None, gdelt_df=None, markets_df=None,
+    air_df=None, trends_df=None, reddit_df=None
+):
+    # One centered row; only render buttons that have data
+    cols = st.columns([1,1,1,1,1], gap="small")
+
+    idx = 0
+    def _place(label, df):
+        nonlocal idx
+        if df is None or getattr(df, "empty", True):
+            return
+        with cols[idx % len(cols)]:
+            st.download_button(
+                label=label,
+                data=_df_to_csv_bytes(df),
+                file_name=label.lower().replace(" ", "_") + ".csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        idx += 1
+
+    _place("Download News CSV", news_df)
+    _place("Download GDELT CSV", gdelt_df)
+    _place("Download Markets CSV", markets_df)
+    _place("Download Air Traffic CSV", air_df)
+    _place("Download Trends CSV", trends_df)
+    _place("Download Reddit CSV", reddit_df)
