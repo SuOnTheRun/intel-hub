@@ -3,82 +3,78 @@ import streamlit as st
 def apply_page_style():
     st.markdown("""
     <style>
-    /* ===== Base layout & typography ===== */
-    .block-container { padding-top: 1.5rem; padding-bottom: 3rem; }
-    h1, h2, h3, h4 { font-family: ui-serif, Georgia, 'Times New Roman', serif; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif; }
-    .stDataFrame { border-radius: 12px; }
+      /* Layout */
+      .block-container { padding-top: 1.2rem; padding-bottom: 2.4rem; }
 
-    /* ===== Premium hero ===== */
-    .hero { text-align:center; margin-bottom: 8px; }
-    .hero-title { font-size: 36px; font-weight: 800; letter-spacing: .6px; }
-    .hero-sub { font-size: 13px; color: #8E94A1; font-style: italic; margin-top: 4px; }
-    .hero:after { content:""; display:block; width: 160px; height:1px; margin: 12px auto 6px; background: linear-gradient(90deg, transparent, #C2A86B, transparent); }
+      /* Hero (title area) */
+      .hero{ display:flex; flex-direction:column; align-items:center; margin:6px 0 12px 0; }
+      .hero-title{
+        font-family: ui-serif, Georgia, "Times New Roman", serif;
+        font-size: 36px; font-weight: 800; letter-spacing: .6px;
+        color: #e9edf4;
+      }
+      .hero-sub{
+        margin-top: 2px; font-size: 12.5px; color:#a6aebe; font-style: italic;
+      }
 
-    /* ===== Alerts (visible, luxe amber) ===== */
-    .alert-strip{
-      background: rgba(194,168,107,0.10);
-      color: #E9D9A7;
-      border: 1px solid rgba(194,168,107,0.35);
-      border-radius: 12px;
-      padding: 10px 14px;
-      margin: 2px 0 12px 0;
-    }
+      /* Section header & separators (softer, not black) */
+      .section-head{
+        display:flex; align-items:baseline; justify-content:space-between;
+        border-bottom:1px solid #3a4150; padding:6px 2px 8px 2px; margin:8px 2px 14px 2px;
+      }
+      .section-title{ font-size:18px; font-weight:600; letter-spacing:.2px; }
+      .section-note{ font-size:12px; color:#9aa3af; font-style:italic; }
 
-    /* ===== Buttons ===== */
-    .stDownloadButton > button, .stLinkButton > button, .stButton > button {
-      background: #0E1117 !important;
-      color: #E6E6E6 !important;
-      border: 1px solid #2A2F3A !important;
-      border-radius: 14px !important;
-      padding: 8px 14px !important;
-      font-weight: 500 !important;
-      letter-spacing: 0.2px !important;
-      box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 6px 12px rgba(0,0,0,0.25) !important;
-      transition: transform .08s ease, border-color .15s ease, box-shadow .2s ease !important;
-    }
-    .stDownloadButton > button:hover, .stLinkButton > button:hover, .stButton > button:hover {
-      border-color: #3A4150 !important;
-      box-shadow: 0 2px 0 rgba(255,255,255,0.05) inset, 0 10px 18px rgba(0,0,0,0.32) !important;
-      transform: translateY(-1px);
-    }
-    .stDownloadButton > button:active, .stLinkButton > button:active, .stButton > button:active {
-      transform: translateY(0);
-      box-shadow: none !important;
-    }
-    .stDownloadButton, .stLinkButton, .stButton { margin-right: 8px !important; }
+      /* Soft card for KPI area */
+      .soft-card{
+        border:1px solid #2c3445; border-radius:16px;
+        background: #0f141b; padding:12px 14px; margin:6px 0 16px 0;
+      }
 
-    /* ===== Section headers & separators (light gray) ===== */
-    .section-head{
-      display:flex; align-items:baseline; justify-content:space-between;
-      border-bottom:1px solid #3E4452; padding:6px 2px 8px 2px; margin:6px 2px 14px 2px;
-    }
-    .section-title{ font-size:18px; font-weight:600; letter-spacing:.2px; }
-    .section-note{ font-size:12px; color:#9AA0A6; font-style:italic; }
+      /* Alerts bar (subtle amber) */
+      .alert-strip{
+        background: linear-gradient(180deg,#1a1913,#15140f);
+        border:1px solid #4b3e1d; color:#f0e6c8;
+        border-radius:12px; padding:8px 12px; margin:4px 0 12px 0;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+      }
 
-    /* ===== Soft card (subtle, not a thick black bar) ===== */
-    .soft-card{
-      border:1px solid #2A2F3A; border-radius:16px;
-      background: linear-gradient(180deg, rgba(20,24,36,.14), rgba(20,24,36,.06));
-      padding:12px 14px; margin:4px 0 16px 0;
-    }
+      /* Luxe buttons (download/link/normal) */
+      .stDownloadButton > button,
+      .stLinkButton > button,
+      .stButton > button {
+        background: linear-gradient(180deg,#171e27,#0f141b);
+        color:#e9edf4 !important;
+        border:1px solid #344055 !important;
+        border-radius:14px !important;
+        padding:8px 16px !important;
+        font-weight:600 !important;
+        letter-spacing:.2px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.03) !important;
+        transition: transform .08s ease, box-shadow .18s ease, border-color .18s ease !important;
+      }
+      .stDownloadButton > button:hover,
+      .stLinkButton > button:hover,
+      .stButton > button:hover {
+        transform: translateY(-1px);
+        border-color:#56617a !important;
+        box-shadow: 0 6px 16px rgba(0,0,0,.30) !important;
+      }
+      .stDownloadButton, .stLinkButton, .stButton { margin-right: 6px !important; }
 
-    /* ===== Tabs (different from buttons) ===== */
-    .stTabs [role="tablist"]{ gap:8px; border-bottom:1px solid #3E4452; padding-bottom:6px; }
-    .stTabs [role="tab"]{
-      background:#101421; border:1px solid #2A2F3A; color:#DDE1E7;
-      border-radius:12px; padding:6px 12px; font-weight:600;
-    }
-    .stTabs [role="tab"][aria-selected="true"]{
-      background:#141a2a; border-color:#54607A; color:#FFFFFF;
-      box-shadow: 0 8px 20px rgba(0,0,0,.22) inset;
-    }
+      /* Tabs – distinct from buttons */
+      .stTabs [role="tablist"]{ gap:8px; border-bottom:1px solid #3a4150; padding-bottom:6px; }
+      .stTabs [role="tab"]{
+        background:#121824; border:1px solid #2f3a4a; color:#e7ebf2;
+        border-radius:12px; padding:6px 12px; font-weight:500;
+      }
+      .stTabs [role="tab"][aria-selected="true"]{ background:#0f141b; border-color:#56617a; }
 
-    /* ===== Reliability chips ===== */
-    .chip-row{ margin:6px 0 8px 0; }
-    .chip{
-      display:inline-block; padding:2px 8px; border:1px solid #2A2F3A; border-radius:999px;
-      font-size:12px; color:#C9CDD3; background:#10141E; margin-right:6px; margin-bottom:6px;
-    }
+      /* Chips for tiny labels if you need them */
+      .chip-row{ margin:6px 0 8px 0; }
+      .chip{
+        display:inline-block; padding:2px 8px; border:1px solid #2a3140; border-radius:999px;
+        font-size:12px; color:#c9cfd6; background:#0f141b; margin-right:6px; margin-bottom:6px;
+      }
     </style>
     """, unsafe_allow_html=True)
