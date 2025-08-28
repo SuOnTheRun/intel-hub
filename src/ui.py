@@ -318,8 +318,11 @@ def render_top_events_split(df, n=20, title="Top Events"):
 
         # Headline picker (ties to the chart on the right)
         options = tbl["Headline"].astype(str).tolist()
-        selected = st.selectbox("Pick an event", options, index=0, label_visibility="collapsed",
-                                help="Select a headline to inspect its emotion profile.")
+        selected = st.selectbox(
+    "Pick an event", options, index=0,
+    label_visibility="collapsed", key="ov_event_pick"
+)
+
         st.dataframe(
             tbl,
             use_container_width=True, hide_index=True, height=480,
@@ -336,7 +339,10 @@ def render_top_events_split(df, n=20, title="Top Events"):
             regions = sorted(df["region"].dropna().astype(str).unique().tolist())
         else:
             regions = []
-        region_sel = st.selectbox("Region", ["All"] + regions if regions else ["All"], index=0)
+        region_sel = st.selectbox(
+    "Region", ["All"] + regions if regions else ["All"],
+    index=0, key="ov_event_region"
+)
 
         base = df if region_sel == "All" else df[df["region"].astype(str) == region_sel]
 
