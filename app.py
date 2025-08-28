@@ -117,23 +117,31 @@ def psychological_state_index_delta(df):
 def engagement_friction_delta(reddit_df):
     """
     Reddit-only (real data): friction ~ impressions-to-action proxy.
-    We use score as 'impressions/approval' and comments as 'action'.
+    score ~ impressions/approval, comments ~ action.
     Friction = score / (comments+1). Higher => more passive; lower => more discussion/action.
-    Returns last 24h vs prior 24h.
+    Compares last 24h vs prior 24h.
     """
     if reddit_df is None or getattr(reddit_df, "empty", True):
         return {"current": 0.0, "delta": 0.0}
+
     tcol = _pick_time_col(reddit_df)
     last, prev = _split_24h_windows(reddit_df, tcol)
-    def _fric(x):
+
+    def _fric(x: pd.DataFrame) -> float:
         if x is None or x.empty:
             return 0.0
         s = x.copy()
-        score = s["score"] if "score" in s.columns else 0
-        comments = s["num_comments"] if "num_comments" in s.columns else 0
-        num = pd.to_numeric(score, errors="coerce").fillna(0.0)
-        den = (pd.to_numeric(comments, errors="coerce").fillna(0.0) + 1.0)
-        return float((num / den).mean())
+
+        # Always work with Series (fallback = zeros Series with same index)
+        zero = pd.Series(0.0, index=s.index)
+        score = pd.to_numeric(s["score"], errors="coerce") if "score" in s.columns else zero
+        comments = pd.to_numeric(s["num_comments"], errors="coerce") if "num_comments" in s.columns else zero
+
+        score = score.fillna(0.0)
+        comments = comments.fillna(0.0)
+
+        return float((score / (comments + 1.0)).mean())
+
     cur = _fric(last)
     base = _fric(prev)
     return {"current": round(cur, 3), "delta": round(cur - base, 3)}
