@@ -2,6 +2,21 @@ import os
 import streamlit as st
 import pandas as pd
 
+from src.analytics import (
+    enrich_news_with_topics_regions, aggregate_kpis, build_social_listening_panels,
+    add_risk_scores, filter_by_controls, TOPIC_LIST, cluster_headlines,
+    add_emotions, extend_kpis_with_intel,
+    # NEW ↓
+    compute_data_freshness, source_breakdown, detect_overview_alerts
+)
+from src.ui import (
+    render_header, render_kpi_row, render_event_cards, render_news_table, render_markets,
+    render_trends, render_reddit, render_regions_grid, render_feed_panel,
+    # NEW ↓
+    render_alert_strip, render_reliability_panel
+)
+
+
 from src.theming import apply_page_style
 from src.presets import region_names, region_bbox, region_center, region_keywords
 from src.analytics import (
@@ -99,12 +114,28 @@ download_buttons(
     air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
 )
 
+# --- Reliability & Alerts ---
+freshness = compute_data_freshness(
+    news=news_df,
+    gdelt=gdelt_df if not gdelt_df.empty else pd.DataFrame(),
+    air=air_df,
+    trends=trends_df,
+    reddit=reddit_df
+)
+src_counts = source_breakdown(pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df)
+alerts = detect_overview_alerts(kpis, freshness)
+
+
 # ---------------- Tabs (must be BEFORE the with-blocks) ----------------
 tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.tabs(
     ["Overview","Regional Analysis","Intelligence Feed","Movement Tracking","Markets","Social Listening"]
 )
 
+
 # ---------------- Tab bodies ----------------
+# NEW: alert strip first
+render_alert_strip(alerts)
+
 with tab_overview:
     from src.ui import render_kpi_row_intel, render_event_cards_with_emotion
     render_kpi_row_intel(kpis)
@@ -137,6 +168,10 @@ with tab_mobility:
             if selected:
                 tdf = fetch_opensky_tracks_for_icao24(selected)
                 render_tracks_map(tdf)
+
+# NEW: reliability block
+render_reliability_panel(freshness, src_counts, col_label="Feed")
+
 
 with tab_markets:
     render_markets(markets_df)
