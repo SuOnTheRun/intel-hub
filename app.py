@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 
+
 from src.analytics import (
     enrich_news_with_topics_regions, aggregate_kpis, build_social_listening_panels,
     add_risk_scores, filter_by_controls, TOPIC_LIST, cluster_headlines,
@@ -10,11 +11,11 @@ from src.analytics import (
     compute_data_freshness, source_breakdown, detect_overview_alerts
 )
 from src.ui import (
-    render_header, render_kpi_row, render_event_cards, render_news_table, render_markets,
-    render_trends, render_reddit, render_regions_grid, render_feed_panel,
-    # NEW ↓
-    render_alert_strip, render_reliability_panel, render_alert_strip, render_reliability_panel, render_section_header, begin_card, end_card, render_top_events_split
-
+    render_header, render_markets, render_trends, render_reddit,
+    render_regions_grid, render_feed_panel,
+    # NEW helpers used below
+    render_kpi_row_intel, render_top_events_split,
+    render_section_header, render_alert_strip, render_reliability_panel
 )
 
 
@@ -137,58 +138,60 @@ freshness = compute_data_freshness(
 src_counts = source_breakdown(pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df)
 alerts = detect_overview_alerts(kpis, freshness)
 
-
 # ---------------- Tabs (must be BEFORE the with-blocks) ----------------
 tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.tabs(
-    ["Overview","Regional Analysis","Intelligence Feed","Movement Tracking","Markets","Social Listening"]
+    ["Overview", "Regional Analysis", "Intelligence Feed", "Movement Tracking", "Markets", "Social Listening"]
 )
-
 
 # ---------------- Tab bodies ----------------
-
 with tab_overview:
-    # 1) Alerts (strip)
+    # Alerts (simple examples; adjust thresholds if you like)
+    alerts = []
+    if kpis.get("mobility_anomalies", 0) > 500:
+        alerts.append(f"Mobility anomalies elevated (≈{kpis['mobility_anomalies']})")
+    if kpis.get("early_warning", 0) >= 6:
+        alerts.append(f"Early Warning Index high ({kpis['early_warning']})")
     render_alert_strip(alerts)
 
-    # 2) Scorecard (highlighted box)
- render_section_header(
-    "Strategic Highlights",
-    "Early Warning blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies."
-)
-    begin_card()
-    from src.ui import render_kpi_row_intel  # safe if already imported elsewhere
-    render_kpi_row_intel(kpis)
-    end_card()
-
-    # 3) Top events (table + one sentiment chart)
-    render_top_events_split(
-        pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered,
-        n=20, title="Top Events"
+    # Strategic Highlights (formerly Scorecard)
+    render_section_header(
+        "Strategic Highlights",
+        "* Early Warning Index blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies; higher means more concerning."
     )
+    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
+    render_kpi_row_intel(kpis)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # 4) Risk / Mobility Heat (map with graceful fallback)
+    # Top Events + HUMINT emotions
+    top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
+    render_top_events_split(top_events, n=20, title="Top Events")
+
+    # Risk / Mobility Heat (GDELT if available, else air-traffic density)
     render_section_header(
         "Risk / Mobility Heat",
-        "Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density for situational awareness."
+        "* Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density for situational awareness."
     )
-    has_gdelt_map = (not gdelt_df.empty) and {"lat","lon"}.issubset(set(gdelt_df.columns))
-    if has_gdelt_map:
-        from src.presets import region_center
-        from src.maps import render_global_gdelt_map
+    from src.presets import region_center
+    from src.maps import render_global_gdelt_map, render_global_air_map
+    if not gdelt_df.empty and {"lat", "lon"}.issubset(set(gdelt_df.columns)):
         render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
-    elif air_df is not None and not air_df.empty:
-        from src.presets import region_center
-        st.caption("GDELT map unavailable; showing air-traffic fallback for the region.")
-        render_global_air_map(air_df, center=region_center(region), zoom=4)
     else:
-        st.info("No geocoded events or air-traffic data available for the selected window.")
+        render_global_air_map(air_df, center=region_center(region), zoom=4)
 
-    # 5) Signal reliability (chips + table)
+    # Signal Reliability
     render_section_header(
         "Signal Reliability",
-        "Counts and last-update age for each feed (minutes since latest timestamp)."
+        "* Counts and last-update age for each feed (minutes since latest timestamp)."
     )
-    render_reliability_panel(freshness, src_counts)
+    freshness = {"news": None, "gdelt": None, "air": None, "trends": None, "reddit": None}
+    src_counts = {
+        "news": len(news_df) if news_df is not None else 0,
+        "gdelt": len(gdelt_df) if gdelt_df is not None else 0,
+        "air": len(air_df) if air_df is not None else 0,
+        "trends": len(trends_df) if trends_df is not None else 0,
+        "reddit": len(reddit_df) if reddit_df is not None else 0,
+    }
+    render_reliability_panel(freshness, src_counts, col_label="Feed")
 
 with tab_regions:
     render_regions_grid(
@@ -210,10 +213,6 @@ with tab_mobility:
             if selected:
                 tdf = fetch_opensky_tracks_for_icao24(selected)
                 render_tracks_map(tdf)
-
-# NEW: reliability block
-render_reliability_panel(freshness, src_counts, col_label="Feed")
-
 
 with tab_markets:
     render_markets(markets_df)
