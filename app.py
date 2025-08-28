@@ -292,19 +292,32 @@ with tab_overview:
 
      # Morning Pulse row (click cards to expand)
     render_pulse_row(pulse)
+# Alerts (keep your logic)
+alerts = []
+if kpis.get("mobility_anomalies", 0) > 500:
+    alerts.append(f"Mobility anomalies elevated (≈{kpis['mobility_anomalies']})")
+if kpis.get("early_warning", 0) >= 6:
+    alerts.append(f"Early Warning Index high ({kpis['early_warning']})")
+render_alert_strip(alerts)
 
-    # Strategic Highlights (formerly Scorecard)
-    render_section_header(
-        "Strategic Highlights",
-        "* Early Warning Index blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies; higher means more concerning."
-    )
-    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
-    render_kpi_row_intel(kpis)
-    st.markdown('</div>', unsafe_allow_html=True)
+# === Executive Pulse (top briefing cards) ===
+events_all = pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df
+gri  = global_risk_index_delta(events_all)
+vel  = event_velocity_delta(events_all)
+psi  = psychological_state_index_delta(events_all)
+fric = engagement_friction_delta(reddit_df)
+
+render_section_header("Executive Pulse",
+                      "* One-glance view: risk, velocity, psychological tilt, engagement friction, and live alerts.")
+render_executive_pulse(gri, vel, psi, fric, alert_count=len(alerts))
+
 
     # Top Events + HUMINT emotions
-    top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
-    render_top_events_split(top_events, n=20, title="Top Events")
+  top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
+render_top_events_split(top_events, n=20, title="Top Events")
+render_topic_influence(events_all, title="Topic Influence (by Risk × Emotion)")
+
+
 
     # Risk / Mobility Heat (GDELT if available, else air-traffic density)
     render_section_header(
