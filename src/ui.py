@@ -5,6 +5,95 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+
+def render_alert_strip(alerts: list[str]):
+    """
+    Compact, high-contrast alert strip under the header.
+    """
+    if not alerts:
+        return
+    with st.container():
+        st.markdown(
+            """
+            <div style="
+                background:#0E1117;
+                border:1px solid #2A2F3A;
+                padding:10px 14px;
+                border-radius:12px;
+                font-size:14px;
+            ">
+            <b>Alerts</b> — """ + " • ".join([st._escape_markdown(a) for a in alerts]) + "</div>",
+            unsafe_allow_html=True,
+        )
+
+def render_reliability_panel(freshness: dict, counts: dict, col_label="Feed"):
+    """
+    Small table: source freshness + counts so the overview feels reliable.
+    """
+    if not freshness:
+        return
+    rows = []
+    for name, meta in freshness.items():
+        rows.append({
+            col_label: name,
+            "Items": meta.get("count"),
+            "Last Update (UTC)": str(meta.get("last_ts")) if meta.get("last_ts") is not None else "—",
+            "Age (min)": meta.get("age_min") if meta.get("age_min") is not None else "—",
+        })
+    df = pd.DataFrame(rows)
+    st.markdown("##### Signal Reliability")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    if counts:
+        st.caption("Top sources (by item count): " + ", ".join(f"{k} ({v})" for k, v in list(counts.items())[:8]))
+
+def render_event_cards_with_emotion(df, title, n=12):
+    """
+    Enhanced event cards: headline, meta (region/topic/risk/age/source), micro emotion bars, link.
+    """
+    if df is None or df.empty:
+        st.write("No events in window.")
+        return
+    st.subheader(title)
+    show = df.head(n).copy()
+
+    # Derive 'age' if we can
+    time_col = None
+    for c in ["published", "published_at", "date", "datetime", "timestamp", "time", "ts"]:
+        if c in show.columns:
+            time_col = c
+            break
+    if time_col is not None:
+        show["_dt"] = pd.to_datetime(show[time_col], errors="coerce", utc=True)
+        now = pd.Timestamp.utcnow()
+        show["_age_min"] = (now - show["_dt"]).dt.total_seconds() / 60.0
+    else:
+        show["_age_min"] = np.nan
+
+    cols = st.columns(3)
+    for i, (_, row) in enumerate(show.iterrows()):
+        with cols[i % 3]:
+            st.markdown(f"**{row.get('title','')}**")
+
+            # meta line
+            region = row.get("region", "Global")
+            topic = row.get("topic", "General")
+            risk  = row.get("risk_score", "—")
+            src   = row.get("source", row.get("provider", row.get("site", row.get("domain", "—"))))
+            age_s = f"{int(row['_age_min'])}m ago" if pd.notna(row.get("_age_min")) else "—"
+            st.caption(f"{region} · {topic} · Risk {risk} · {age_s} · {src}")
+
+            # emotion microbar
+            emo = [row.get(f"emo_{k}",0.0) for k in ["fear","anger","sadness","joy","trust"]]
+            efig = go.Figure(go.Bar(x=["Fear","Anger","Sadness","Joy","Trust"], y=emo))
+            efig.update_layout(height=120, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+            st.plotly_chart(efig, use_container_width=True, config={"displayModeBar": False})
+
+            url = row.get("url")
+            if isinstance(url, str) and url:
+                st.link_button("Open source", url)
+
+
 def render_kpi_row_intel(kpis):
     # Row 1: your current KPIs
     cols1 = st.columns(5)
