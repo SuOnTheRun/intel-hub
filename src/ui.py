@@ -248,6 +248,44 @@ def begin_card():
 def end_card():
     st.markdown('</div>', unsafe_allow_html=True)
 
+def render_executive_pulse(gri: dict, vel: dict, psi: dict, fric: dict, alert_count: int):
+    """Top-row briefing KPIs with clean deltas & hover help."""
+    begin_card()
+    cols = st.columns(5)
+
+    with cols[0]:
+        st.metric(
+            "Global Risk Index", gri.get("current", 0.0),
+            delta=gri.get("delta", 0.0),
+            help="Mean risk (0–10) over the last 24h vs the prior 24h."
+        )
+    with cols[1]:
+        st.metric(
+            "Event Velocity (hr)", vel.get("current", 0.0),
+            delta=vel.get("delta", 0.0),
+            help="Average events/hour across the last 24 hourly buckets vs the prior 24h."
+        )
+    with cols[2]:
+        st.metric(
+            "Psychological Tilt", psi.get("current", 0.0),
+            delta=psi.get("delta", 0.0),
+            help="(Fear+Anger+Sadness − Joy−Trust). Positive ⇒ more negative affect."
+        )
+        st.caption(f"*Dominant emotion:* {psi.get('dominant','—')}")
+    with cols[3]:
+        st.metric(
+            "Engagement Friction", fric.get("current", 0.0),
+            delta=fric.get("delta", 0.0),
+            help="Impressions-to-action proxy from Reddit: score / (comments+1)."
+        )
+    with cols[4]:
+        st.metric(
+            "Active Alerts", alert_count,
+            help="Count of live critical signals on this page."
+        )
+    end_card()
+
+
 def render_top_events_split(df, n=20, title="Top Events"):
     """
     Left: compact table of headlines (with picker).
@@ -444,6 +482,51 @@ def render_reddit(df: pd.DataFrame):
         df[["created_utc","subreddit","title","score","url","query"]].sort_values("created_utc", ascending=False).head(150),
         use_container_width=True, height=480
     )
+
+def render_topic_influence(df: pd.DataFrame, title="Topic Influence"):
+    """
+    Risk-weighted topic importance, split by emotions (no placeholders).
+    """
+    if df is None or df.empty or "topic" not in df.columns:
+        return
+
+    render_section_header(title, "Risk-weighted counts; bars split by mean emotion levels.")
+    # Region filter if available
+    regions = sorted(df["region"].dropna().astype(str).unique().tolist()) if "region" in df.columns else []
+    region_sel = st.selectbox("Region", ["All"] + regions if regions else ["All"], index=0)
+    base = df if region_sel == "All" else df[df["region"].astype(str) == region_sel]
+
+    # Ensure risk & emotion columns exist
+    base = base.copy()
+    if "risk_score" not in base.columns:
+        base["risk_score"] = 1.0
+    for c in ["emo_fear","emo_anger","emo_sadness","emo_joy","emo_trust"]:
+        if c not in base.columns: base[c] = 0.0
+
+    # Risk-weighted importance + mean emotion by topic
+    agg = base.groupby("topic").agg(
+        importance=("risk_score","sum"),
+        fear=("emo_fear","mean"),
+        anger=("emo_anger","mean"),
+        sadness=("emo_sadness","mean"),
+        joy=("emo_joy","mean"),
+        trust=("emo_trust","mean"),
+    ).reset_index()
+
+    # Sort by importance, keep top 10
+    agg = agg.sort_values("importance", ascending=False).head(10)
+
+    fig = go.Figure()
+    for key, label in [("fear","Fear"),("anger","Anger"),("sadness","Sadness"),("joy","Joy"),("trust","Trust")]:
+        fig.add_bar(
+            x=agg["topic"], y=agg[key],
+            name=label,
+        )
+    fig.update_layout(
+        barmode="stack", height=420, margin=dict(l=10,r=10,t=10,b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 
