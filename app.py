@@ -271,18 +271,14 @@ kpis = aggregate_kpis(
 )
 kpis = extend_kpis_with_intel(kpis, news_df, gdelt_df if not gdelt_df.empty else None, air_df)
 
-# Action bar — grouped by purpose (Feeds | Mobility | Markets)
-with st.container():
-    c1, c2, c3 = st.columns([1,1,1])
-    with c1:
-        st.caption("**Feeds**")
-        download_buttons(news_df=news_df, gdelt_df=gdelt_df, trends_df=trends_df, reddit_df=reddit_df)
-    with c2:
-        st.caption("**Mobility**")
+## Top-right Export popover (clean)
+right = st.columns([6,1])[1]
+with right:
+    with st.popover("Export", use_container_width=True):
+        download_buttons(news_df=news_df, trends_df=trends_df, reddit_df=reddit_df)
         download_buttons(air_df=air_df)
-    with c3:
-        st.caption("**Markets**")
         download_buttons(markets_df=markets_df)
+
 
 
 
@@ -334,16 +330,15 @@ with tab_overview:
     render_topic_influence(events_all, title="Topic Influence (by Risk × Emotion)")
 
     # ---- Risk / Mobility Heat (GDELT if available, else air-traffic)
-    render_section_header(
+        render_section_header(
         "Risk / Mobility Heat",
-        "* Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density."
+        "* GDELT risk heat when available; else air-traffic; else region risk tiles."
     )
     from src.presets import region_center
-    from src.maps import render_global_gdelt_map, render_global_air_map
-    if not gdelt_df.empty and {"lat", "lon"}.issubset(set(gdelt_df.columns)):
-        render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
-    else:
-        render_global_air_map(air_df, center=region_center(region), zoom=4)
+    from src.maps import render_risk_or_map
+    events_all = pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df
+    render_risk_or_map(gdelt_df, air_df, region_center(region), events_all)
+
 
     # ---- Signal Reliability  (real freshness — see Step 4)
     render_section_header(
