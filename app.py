@@ -257,13 +257,19 @@ kpis = aggregate_kpis(
 )
 kpis = extend_kpis_with_intel(kpis, news_df, gdelt_df if not gdelt_df.empty else None, air_df)
 
-# Action bar — centered (no raw HTML)
-_, center, _ = st.columns([1, 3, 1])
-with center:
-    download_buttons(
-        news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df,
-        air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
-    )
+# Action bar — grouped by purpose (Feeds | Mobility | Markets)
+with st.container():
+    c1, c2, c3 = st.columns([1,1,1])
+    with c1:
+        st.caption("**Feeds**")
+        download_buttons(news_df=news_df, gdelt_df=gdelt_df, trends_df=trends_df, reddit_df=reddit_df)
+    with c2:
+        st.caption("**Mobility**")
+        download_buttons(air_df=air_df)
+    with c3:
+        st.caption("**Markets**")
+        download_buttons(markets_df=markets_df)
+
 
 
 # Combined pool for overview analytics
@@ -285,7 +291,7 @@ tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.
 
 # ---------------- Tab bodies ----------------
 with tab_overview:
-    # Alerts (simple examples; adjust thresholds if you like)
+    # ---- Alerts strip (simple examples; adjust thresholds as you wish)
     alerts = []
     if kpis.get("mobility_anomalies", 0) > 500:
         alerts.append(f"Mobility anomalies elevated (≈{kpis['mobility_anomalies']})")
@@ -293,91 +299,55 @@ with tab_overview:
         alerts.append(f"Early Warning Index high ({kpis['early_warning']})")
     render_alert_strip(alerts)
 
-     # Morning Pulse row (click cards to expand)
-    render_pulse_row(pulse)
-# Alerts (keep your logic)
-alerts = []
-if kpis.get("mobility_anomalies", 0) > 500:
-    alerts.append(f"Mobility anomalies elevated (≈{kpis['mobility_anomalies']})")
-if kpis.get("early_warning", 0) >= 6:
-    alerts.append(f"Early Warning Index high ({kpis['early_warning']})")
-render_alert_strip(alerts)
+    # ---- Executive Pulse (briefing KPIs)
+    events_all = pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df
+    gri  = global_risk_index_delta(events_all)
+    vel  = event_velocity_delta(events_all)
+    psi  = psychological_state_index_delta(events_all)
+    fric = engagement_friction_delta(reddit_df)
 
-# === Executive Pulse (top briefing cards) ===
-events_all = pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df
-gri  = global_risk_index_delta(events_all)
-vel  = event_velocity_delta(events_all)
-psi  = psychological_state_index_delta(events_all)
-fric = engagement_friction_delta(reddit_df)
+    render_section_header(
+        "Executive Pulse",
+        "* One-glance view: risk, velocity, psychological tilt, engagement friction, and live alerts."
+    )
+    render_executive_pulse(gri, vel, psi, fric, alert_count=len(alerts))
 
-render_section_header("Executive Pulse",
-                      "* One-glance view: risk, velocity, psychological tilt, engagement friction, and live alerts.")
-render_executive_pulse(gri, vel, psi, fric, alert_count=len(alerts))
+    # ---- Top Events + HUMINT emotions on click
+    top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
+    render_top_events_split(top_events, n=20, title="Top Events")
 
+    # ---- Topic Influence (single elegant panel; no clutter)
+    render_topic_influence(events_all, title="Topic Influence (by Risk × Emotion)")
 
-    # Top Events + HUMINT emotions
-  top_events = pd.concat([clustered, clustered_gdelt], ignore_index=True) if not clustered_gdelt.empty else clustered
-render_top_events_split(top_events, n=20, title="Top Events")
-render_topic_influence(events_all, title="Topic Influence (by Risk × Emotion)")
-
-
-
-    # Risk / Mobility Heat (GDELT if available, else air-traffic density)
+    # ---- Risk / Mobility Heat (GDELT if available, else air-traffic)
     render_section_header(
         "Risk / Mobility Heat",
-        "* Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density for situational awareness."
+        "* Risk heat uses geocoded GDELT density when available; falls back to live air-traffic density."
     )
-
-    # Emotion & Psychology Console
-    render_emotion_lens(event_pool)
-    render_topics_lens(event_pool)
-    render_psychology_console(event_pool)
-
     from src.presets import region_center
     from src.maps import render_global_gdelt_map, render_global_air_map
     if not gdelt_df.empty and {"lat", "lon"}.issubset(set(gdelt_df.columns)):
         render_global_gdelt_map(gdelt_df, center=region_center(region), zoom=4)
     else:
         render_global_air_map(air_df, center=region_center(region), zoom=4)
-    # Signal Reliability
+
+    # ---- Signal Reliability  (real freshness — see Step 4)
     render_section_header(
         "Signal Reliability",
         "* Counts and last-update age for each feed (minutes since latest timestamp)."
     )
-
-    def _last_ts_age(df):
-        if df is None or getattr(df, "empty", True):
-            return None, None
-        tcol = next((c for c in ["published","published_at","date","datetime","timestamp","time","ts","created_utc","created","created_at"] if c in df.columns), None)
-        if not tcol:
-            return None, None
-        s = pd.to_datetime(df[tcol], errors="coerce", utc=True).dropna()
-        if s.empty:
-            return None, None
-        last = s.max()
-        age = (pd.Timestamp.utcnow() - last).total_seconds() / 60.0
-        return last, round(age, 1)
-
-    f_news   = _last_ts_age(news_df)
-    f_gdelt  = _last_ts_age(gdelt_df)
-    f_reddit = _last_ts_age(reddit_df)
-
-    freshness = {
-        "news":   {"count": len(news_df)   if news_df   is not None else 0, "last_ts": f_news[0],   "age_min": f_news[1]},
-        "gdelt":  {"count": len(gdelt_df)  if gdelt_df  is not None else 0, "last_ts": f_gdelt[0],  "age_min": f_gdelt[1]},
-        "air":    {"count": len(air_df)    if air_df    is not None else 0, "last_ts": None,        "age_min": None},
-        "trends": {"count": len(trends_df) if trends_df is not None else 0, "last_ts": None,        "age_min": None},
-        "reddit": {"count": len(reddit_df) if reddit_df is not None else 0, "last_ts": f_reddit[0], "age_min": f_reddit[1]},
-    }
-
+    freshness = compute_data_freshness(
+        news=news_df,
+        gdelt=gdelt_df if not gdelt_df.empty else pd.DataFrame(),
+        air=air_df, trends=trends_df, reddit=reddit_df
+    )
     src_counts = {
-        "news": len(news_df) if news_df is not None else 0,
-        "gdelt": len(gdelt_df) if gdelt_df is not None else 0,
-        "air": len(air_df) if air_df is not None else 0,
+        "news":   len(news_df)   if news_df   is not None else 0,
+        "gdelt":  len(gdelt_df)  if gdelt_df  is not None else 0,
+        "air":    len(air_df)    if air_df    is not None else 0,
         "trends": len(trends_df) if trends_df is not None else 0,
         "reddit": len(reddit_df) if reddit_df is not None else 0,
     }
-
     render_reliability_panel(freshness, src_counts, col_label="Feed")
 
 
