@@ -62,3 +62,20 @@ def render_global_gdelt_map(gdelt_df, center=(20, 78), zoom=3):
     fig.update_layout(mapbox_style="carto-darkmatter", margin=dict(l=0,r=0,t=0,b=0))
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
+def render_risk_or_map(gdelt_df, air_df, region_center_tuple, events_df_for_tiles):
+    try:
+        if gdelt_df is not None and not gdelt_df.empty and {"lat","lon"}.issubset(set(gdelt_df.columns)):
+            from .maps import render_global_gdelt_map
+            render_global_gdelt_map(gdelt_df, center=region_center_tuple, zoom=4)
+            return
+        if air_df is not None and not air_df.empty:
+            from .maps import render_global_air_map
+            render_global_air_map(air_df, center=region_center_tuple, zoom=4)
+            return
+    except Exception:
+        pass
+    # fallback to region tiles
+    from .analytics import region_risk_table
+    from .ui import render_region_risk_tiles
+    rr = region_risk_table(events_df_for_tiles)
+    render_region_risk_tiles(rr)
