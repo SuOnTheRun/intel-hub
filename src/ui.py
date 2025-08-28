@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import streamlit as st
-from html import escape
 import numpy as np
+from html import escape
+
+import plotly.graph_objects as go
+import plotly.express as px
+
+
 
 
 
@@ -21,27 +23,31 @@ def render_alert_strip(alerts: list[str]):
 
 
 
-def render_reliability_panel(freshness: dict, src_counts: dict, col_label="Feed"):
-
+def render_reliability_panel(freshness: dict, src_counts: dict | None = None, col_label="Feed"):
     """
     Small table: source freshness + counts so the overview feels reliable.
+    freshness[name] = {'count': int, 'last_ts': datetime|None, 'age_min': float|None}
+    src_counts is optional: {'news': 52, 'gdelt': 0, ...}
     """
     if not freshness:
         return
+
     rows = []
     for name, meta in freshness.items():
         rows.append({
             col_label: name,
-            "Items": meta.get("count"),
+            "Items": meta.get("count", "—"),
             "Last Update (UTC)": str(meta.get("last_ts")) if meta.get("last_ts") is not None else "—",
-            "Age (min)": meta.get("age_min") if meta.get("age_min") is not None else "—",
+            "Age (min)": meta.get("age_min", "—"),
         })
     df = pd.DataFrame(rows)
     st.markdown("##### Signal Reliability")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    if counts:
-        st.caption("Top sources (by item count): " + ", ".join(f"{k} ({v})" for k, v in list(counts.items())[:8]))
+    # Optional chip row
+    if src_counts:
+        chips = " ".join(f'<span class="chip">{escape(k)}: {v}</span>' for k, v in list(src_counts.items())[:8])
+        st.markdown(f'<div class="chip-row">{chips}</div>', unsafe_allow_html=True)
 
 def render_event_cards_with_emotion(df, title, n=12):
     """
@@ -125,6 +131,102 @@ def render_kpi_row_intel(kpis):
                            marker=dict(color=["#7f8aa3","#c1a05a","#9aa8b2","#c4876b","#67a99a","#a78fa3","#9db1c7","#8fb08c"])))
     fig.update_layout(height=220, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+def render_pulse_row(pulse):
+    """
+    pulse = {
+      'risk': {'current':..., 'delta':...},
+      'velocity': {'current':..., 'delta':...},
+      'psych': {'current':..., 'delta':..., 'dominant':...},
+      'friction': {'current':..., 'delta':...}
+    }
+    """
+    render_section_header("Morning Pulse", "* Last 24h vs previous 24h; click a card to expand.")
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        st.metric("Global Risk Index", pulse["risk"]["current"],
+                  delta=f'{pulse["risk"]["delta"]:+.2f}')
+        with st.expander("Details"):
+            st.caption("Mean risk (0–10) across events in the last 24h vs the prior 24h.")
+
+    with c2:
+        st.metric("Event Velocity", pulse["velocity"]["current"],
+                  delta=f'{pulse["velocity"]["delta"]:+.2f} / hr')
+        with st.expander("Details"):
+            st.caption("Average events/hour over last 24h vs the prior 24h.")
+
+    with c3:
+        dom = pulse["psych"]["dominant"] or "—"
+        st.metric("Psych. State Index", pulse["psych"]["current"],
+                  delta=f'{pulse["psych"]["delta"]:+.3f}')
+        st.caption(f"Dominant emotion: {dom}")
+        with st.expander("Details"):
+            st.caption("Signed tilt = (fear+anger+sadness) − (joy+trust).")
+
+    with c4:
+        st.metric("Engagement Friction", pulse["friction"]["current"],
+                  delta=f'{pulse["friction"]["delta"]:+.3f}')
+        with st.expander("Details"):
+            st.caption("Reddit proxy: score / (comments+1). Higher = more passive; lower = more action.")
+
+def render_emotion_lens(df):
+    if df is None or df.empty:
+        render_section_header("Emotion Lens", "Interactive emotion view with topic filter and reset.")
+        st.info("No events available.")
+        return
+
+    render_section_header("Emotion Lens", "* Filter by topic; reset to clear filters.")
+
+    topics = sorted([t for t in df.get("topic", pd.Series([], dtype=str)).dropna().unique().tolist()])
+    sel_topics = st.multiselect("Topic filter", topics, default=[])
+    if st.button("Reset filters"):
+        sel_topics = []
+
+    base = df.copy()
+    if sel_topics:
+        base = base[base["topic"].isin(sel_topics)]
+
+    for c in ["emo_fear","emo_anger","emo_sadness","emo_joy","emo_trust"]:
+        if c not in base.columns: base[c] = 0.0
+
+    bars = [float(base[c].mean()) for c in ["emo_fear","emo_anger","emo_sadness","emo_joy","emo_trust"]]
+    fig = go.Figure(go.Bar(
+        x=["Fear","Anger","Sadness","Joy","Trust"], y=bars,
+        marker=dict(color=["#c4876b","#7f8aa3","#a78fa3","#67a99a","#8fb08c"])
+    ))
+    fig.update_layout(height=360, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+def render_topics_lens(df, n=12):
+    if df is None or df.empty or "topic" not in df.columns:
+        render_section_header("Top Topics", "Ranked topics in the selected window.")
+        st.info("No topics available.")
+        return
+
+    render_section_header("Top Topics", "* Ranked by frequency in headlines.")
+    counts = df["topic"].astype(str).value_counts().head(n)
+    fig = go.Figure(go.Bar(
+        x=counts.values.tolist(),
+        y=counts.index.tolist(),
+        orientation="h",
+        marker=dict(color="#54607A")
+    ))
+    fig.update_layout(height=420, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+def render_psychology_console(df):
+    from src.analytics import psychology_buckets
+    render_section_header("Psychology Console", "* Language buckets inferred from headlines.")
+    buckets = psychology_buckets(df)
+    fig = go.Figure(go.Bar(
+        x=["Validation","Action","Next Step","Resistance"],
+        y=[buckets["validation"], buckets["action"], buckets["next_step"], buckets["resistance"]],
+        marker=dict(color=["#9aa8b2","#8fb08c","#c1a05a","#b07b7b"])
+    ))
+    fig.update_layout(height=320, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
 
 
 def render_section_header(title: str, note: str | None = None):
@@ -225,25 +327,7 @@ def render_top_events_split(df, n=20, title="Top Events"):
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
-def render_event_cards_with_emotion(df, title, n=12):
-    if df is None or df.empty:
-        st.write("No events in window.")
-        return
-    st.subheader(title)
-    show = df.head(n)
-    cols = st.columns(3)
-    for i, (_, row) in enumerate(show.iterrows()):
-        with cols[i % 3]:
-            st.markdown(f"**{row.get('title','')}**")
-            meta = f"{row.get('region','Global')} · {row.get('topic','General')} · Risk {row.get('risk_score','—')}"
-            st.caption(meta)
-            emo = [row.get(f"emo_{k}",0.0) for k in ["fear","anger","sadness","joy","trust"]]
-            efig = go.Figure(go.Bar(x=["Fear","Anger","Sadness","Joy","Trust"], y=emo))
-            efig.update_layout(height=120, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
-            st.plotly_chart(efig, use_container_width=True, config={"displayModeBar": False})
-            url = row.get("url")
-            if isinstance(url, str) and url:
-                st.link_button("Open source", url)
+
 
 
 def render_header():
@@ -360,3 +444,6 @@ def render_reddit(df: pd.DataFrame):
         df[["created_utc","subreddit","title","score","url","query"]].sort_values("created_utc", ascending=False).head(150),
         use_container_width=True, height=480
     )
+
+
+
