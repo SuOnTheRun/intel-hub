@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-
 import plotly.graph_objects as go
 import streamlit as st
 from html import escape
@@ -148,33 +147,42 @@ def end_card():
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_top_events_split(df, n=20, title="Top Events"):
-    """Left: compact table of headlines. Right: one aggregate emotion bar."""
+    """
+    Left: compact table of headlines (with picker).
+    Right: big emotions chart for the selected headline + regional average.
+    """
     if df is None or df.empty:
-        render_section_header(title, "Headlines deduplicated by similarity; risk is modelled, not raw mentions.")
+        render_section_header(title, "Headlines are deduplicated by similarity; risk is modelled, not raw mention counts.")
         st.info("No events in the selected window.")
         return
 
     show = df.copy().head(n)
-    # choose time column and compute 'Age (min)'
+
+    # Timestamp → 'Age (min)'
     tcol = next((c for c in ["published","published_at","date","datetime","timestamp","time","ts"] if c in show.columns), None)
     if tcol:
         show["_dt"] = pd.to_datetime(show[tcol], errors="coerce", utc=True)
         now = pd.Timestamp.utcnow()
         show["Age (min)"] = ((now - show["_dt"]).dt.total_seconds() / 60.0).round(0)
 
-    cols = st.columns([2.2, 1])  # left wide, right narrow
+    left, right = st.columns([2.2, 1])
 
-    with cols[0]:
-        render_section_header(title, "Each row is a deduped event: Region · Topic · Risk · Source · Age.")
+    with left:
+        render_section_header(title, "* Click a headline to see HUMINT emotions on the right.")
         tbl = show.rename(columns={
             "title":"Headline","risk_score":"Risk","topic":"Topic","region":"Region",
             "source":"Source","provider":"Source","site":"Source","domain":"Source","url":"Source Link"
         })
         keep = [c for c in ["Headline","Risk","Topic","Region","Source","Age (min)","Source Link"] if c in tbl.columns]
         tbl = tbl[keep]
+
+        # Headline picker (ties to the chart on the right)
+        options = tbl["Headline"].astype(str).tolist()
+        selected = st.selectbox("Pick an event", options, index=0, label_visibility="collapsed",
+                                help="Select a headline to inspect its emotion profile.")
         st.dataframe(
             tbl,
-            use_container_width=True, hide_index=True, height=440,
+            use_container_width=True, hide_index=True, height=480,
             column_config={
                 "Risk": st.column_config.NumberColumn(format="%.1f"),
                 "Age (min)": st.column_config.NumberColumn(format="%.0f"),
@@ -182,44 +190,39 @@ def render_top_events_split(df, n=20, title="Top Events"):
             },
         )
 
-    with cols[1]:
-        render_section_header("Emotion Mix (Selected)", "Mean of Fear/Anger/Sadness vs Joy/Trust across listed headlines.")
+    with right:
+        # Optional region filter for the comparison line
+        if "region" in df.columns:
+            regions = sorted(df["region"].dropna().astype(str).unique().tolist())
+        else:
+            regions = []
+        region_sel = st.selectbox("Region", ["All"] + regions if regions else ["All"], index=0)
+
+        base = df if region_sel == "All" else df[df["region"].astype(str) == region_sel]
+
+        render_section_header("Emotion Mix (Selected)", "Bars = selected headline; line = regional average.")
+
         emo_cols = [f"emo_{k}" for k in ["fear","anger","sadness","joy","trust"]]
         for c in emo_cols:
-            if c not in show.columns:
-                show[c] = 0.0
-        mix = [float(show[c].mean()) for c in emo_cols]
-        fig = go.Figure(go.Bar(x=["Fear","Anger","Sadness","Joy","Trust"], y=mix))
-        fig.update_layout(height=300, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            if c not in show.columns: show[c] = 0.0
+            if c not in base.columns: base[c] = 0.0
 
-def render_reliability_panel(freshness: dict, src_counts: dict):
-    """Clear, compact reliability readout with chips + table."""
-    if not freshness:
-        return
-    # chips
-    chips = []
-    for key, meta in freshness.items():
-        age = meta.get("age_min")
-        count = meta.get("count", 0)
-        if age is None:
-            chips.append(f"{escape(key.title())}: {count} items")
-        else:
-            chips.append(f"{escape(key.title())}: {count} • {int(age)}m")
-    st.markdown(
-        '<div class="chip-row">' + " ".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>",
-        unsafe_allow_html=True,
-    )
-    # table
-    rows = []
-    for name, meta in freshness.items():
-        rows.append({
-            "Feed": name,
-            "Items": meta.get("count"),
-            "Last Update (UTC)": str(meta.get("last_ts")) if meta.get("last_ts") is not None else "—",
-            "Age (min)": meta.get("age_min") if meta.get("age_min") is not None else "—",
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        sel_row = show[show["title"] == selected].head(1)
+        sel_vals = [float(sel_row.iloc[0][c]) if not sel_row.empty else 0.0 for c in emo_cols]
+        reg_vals = [float(base[c].mean()) if not base.empty else 0.0 for c in emo_cols]
+
+        fig = go.Figure()
+        fig.add_bar(
+            x=["Fear","Anger","Sadness","Joy","Trust"], y=sel_vals,
+            marker=dict(color=["#c4876b","#7f8aa3","#a78fa3","#67a99a","#8fb08c"]),
+            name="Selected"
+        )
+        fig.add_scatter(
+            x=["Fear","Anger","Sadness","Joy","Trust"], y=reg_vals,
+            mode="lines+markers", name="Regional avg"
+        )
+        fig.update_layout(height=420, margin=dict(l=10,r=10,t=10,b=10), showlegend=True)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 def render_event_cards_with_emotion(df, title, n=12):
