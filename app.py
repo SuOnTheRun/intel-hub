@@ -194,14 +194,15 @@ with st.sidebar:
     st.markdown("#### Filters")
     rnames = region_names()
     default_idx = rnames.index("Indo-Pacific") if "Indo-Pacific" in rnames else 0
-    region = st.selectbox("Region preset", options=rnames, index=default_idx)
-    hours = st.slider("Time window (hours)", min_value=6, max_value=96, value=48, step=6)
-    topics = st.multiselect("Topics", options=TOPIC_LIST, default=["Security","Mobility","Markets","Elections"])
-    tickers = st.text_input(
-        "Tickers (comma-separated)",
-        value=os.getenv("DEFAULT_TICKERS","RELIANCE.NS,TCS.NS,INFY.NS,^NSEI,TSLA,AAPL,MSFT")
+
+    # add unique keys so Streamlit doesn’t collide
+    region = st.selectbox(
+        "Region preset", options=rnames, index=default_idx, key="side_region_preset"
     )
-    rss_bundle = st.selectbox("RSS bundle", options=["world_major","business_tech"], index=0)
+    ...
+    rss_bundle = st.selectbox(
+        "RSS bundle", options=["world_major","business_tech"], index=0, key="side_rss_bundle"
+    )
     widen_air = st.checkbox("Fallback to global air traffic when region is quiet", value=True)
     st.caption("APIs via env vars: NEWSAPI_KEY · POLYGON_ACCESS_KEY · REDDIT_* · OPENSKY_*")
 
@@ -367,7 +368,11 @@ with tab_mobility:
     if not air_df.empty and "icao24" in air_df.columns:
         icao24s = sorted(air_df["icao24"].dropna().unique().tolist())
         if icao24s:
-            selected = st.selectbox("Select ICAO24 for recent track (requires OpenSky auth)", icao24s)
+           selected = st.selectbox(
+    "Select ICAO24 for recent track (requires OpenSky auth)",
+    icao24s,
+    key="mobility_icao24_select"
+)
             if selected:
                 tdf = fetch_opensky_tracks_for_icao24(selected)
                 render_tracks_map(tdf)
