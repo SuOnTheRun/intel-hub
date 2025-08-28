@@ -7,8 +7,9 @@ from src.presets import region_names, region_bbox, region_center, region_keyword
 from src.analytics import (
     enrich_news_with_topics_regions, aggregate_kpis, build_social_listening_panels,
     add_risk_scores, filter_by_controls, TOPIC_LIST, cluster_headlines,
-    add_emotions, extend_kpis_with_intel,
+    add_emotions, extend_kpis_with_intel, compute_data_freshness,
 )
+
 from src.data_sources import (
     fetch_market_snapshot, fetch_rss_bundle, fetch_newsapi_bundle, merge_news_and_dedupe,
     fetch_google_trends, fetch_opensky_air_traffic, fetch_opensky_tracks_for_icao24,
@@ -20,9 +21,11 @@ from src.ui import (
     render_regions_grid, render_feed_panel,
     render_kpi_row_intel, render_top_events_split,
     render_section_header, render_alert_strip, render_reliability_panel,
-    # NEW: morning-briefing UI
-    render_pulse_row, render_emotion_lens, render_topics_lens, render_psychology_console,
+    # New helpers you added in ui.py
+    render_executive_pulse, render_topic_influence,
 )
+
+
 from src.exporters import download_buttons
 
 # ========= MORNING BRIEFING METRICS & PSYCHOLOGY LEXICONS =========
