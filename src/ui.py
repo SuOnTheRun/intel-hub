@@ -6,6 +6,140 @@ from html import escape
 import plotly.graph_objects as go
 import plotly.express as px
 
+import streamlit as st
+import plotly.graph_objects as go
+import pandas as pd
+
+# ---- Section header
+def render_section_header(title, subtitle=""):
+    st.markdown(f"### {title}")
+    if subtitle:
+        st.caption(subtitle)
+
+# ---- Alert strip
+def render_alert_strip(alerts:list):
+    if not alerts: 
+        return
+    st.markdown(f"""<div class="alert-strip"><b>Alerts</b> — {" | ".join(alerts)}</div>""", unsafe_allow_html=True)
+
+# ---- Executive KPI cards (premium, no heavy chrome)
+def _delta_span(v):
+    if v is None: return ""
+    sign = "▲" if v >= 0 else "▼"
+    cls = "kpi-delta-up" if v >= 0 else "kpi-delta-down"
+    return f'<span class="{cls}">{sign} {abs(v)}</span>'
+
+def render_executive_pulse(gri, vel, psi, fric, alert_count:int=0):
+    c1,c2,c3,c4,c5 = st.columns(5)
+    with c1:
+        st.markdown('<div class="kpi-card"><div class="kpi-label">Global Risk Index</div>'
+                    f'<div class="kpi-value">{gri.get("current",0.0)}</div>'
+                    f'{_delta_span(gri.get("delta",0.0))}</div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="kpi-card"><div class="kpi-label">Event Velocity (hr)</div>'
+                    f'<div class="kpi-value">{vel.get("current",0.0)}</div>'
+                    f'{_delta_span(vel.get("delta",0.0))}</div>', unsafe_allow_html=True)
+    with c3:
+        dom = psi.get("dominant","") or "—"
+        st.markdown('<div class="kpi-card"><div class="kpi-label">Psychological Tilt</div>'
+                    f'<div class="kpi-value">{psi.get("current",0.0)}</div>'
+                    f'{_delta_span(psi.get("delta",0.0))}'
+                    f'<div class="kpi-label" style="margin-top:6px">Dominant emotion: <b>{dom}</b></div>'
+                    '</div>', unsafe_allow_html=True)
+    with c4:
+        st.markdown('<div class="kpi-card"><div class="kpi-label">Engagement Friction</div>'
+                    f'<div class="kpi-value">{fric.get("current",0.0)}</div>'
+                    f'{_delta_span(fric.get("delta",0.0))}</div>', unsafe_allow_html=True)
+    with c5:
+        st.markdown('<div class="kpi-card"><div class="kpi-label">Active Alerts</div>'
+                    f'<div class="kpi-value">{int(alert_count)}</div></div>', unsafe_allow_html=True)
+
+# ---- Top Events split with HUMINT lens
+def _row_emotion_mix(row):
+    keys = ["fear","anger","sadness","joy","trust"]
+    vals = [row.get(f"emo_{k}",0.0) for k in keys]
+    return keys, vals
+
+def _humint_sentence(keys, vals):
+    # formulaic, no ML: pick top emotion and frame a concise takeaway
+    if not vals or sum(vals)==0: 
+        return "Low emotional signal."
+    top_i = max(range(len(vals)), key=lambda i: vals[i])
+    top = keys[top_i].capitalize()
+    if top in ["Fear","Anger","Sadness"]:
+        return f"{top} dominant — expect defensive narratives and resistance to change."
+    if top in ["Joy","Trust"]:
+        return f"{top} dominant — conditions favor cooperative or opportunity-seeking frames."
+    return f"{top} dominant."
+
+def render_top_events_split(df, n=20, title="Top Events"):
+    st.markdown("#### " + title)
+    if df is None or df.empty:
+        st.write("No events.")
+        return
+    show = df.head(n).copy()
+    left, right = st.columns([2,1])
+    with left:
+        sel = st.dataframe(show[["title","topic","region","source","age_min"]].rename(
+            columns={"age_min":"Age (min)"}), use_container_width=True, height=420)
+        # selection proxy: use first row as default
+        idx = show.index[0]
+    with right:
+        keys, vals = _row_emotion_mix(show.loc[idx])
+        fig = go.Figure(data=[go.Pie(labels=[k.capitalize() for k in keys], values=vals, hole=.55)])
+        fig.update_layout(height=320, margin=dict(l=0,r=0,t=10,b=10), showlegend=True)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.caption("HUMINT insight")
+        st.write(_humint_sentence(keys, vals))
+
+# ---- Topic influence (risk × emotion)
+def render_topic_influence(df, title="Topic Influence (by Risk × Emotion)"):
+    st.markdown("#### " + title)
+    if df is None or df.empty or "topic" not in df.columns:
+        st.write("No data.")
+        return
+    keys = ["fear","anger","sadness","joy","trust"]
+    agg = df.groupby("topic").apply(
+        lambda g: pd.Series({k: float((g[f"emo_{k}"] * g.get("risk_score",0)).mean()) for k in keys})
+    ).reset_index()
+    fig = go.Figure()
+    for k in keys:
+        fig.add_trace(go.Bar(name=k.capitalize(), x=agg["topic"], y=agg[k]))
+    fig.update_layout(barmode="stack", height=340, margin=dict(l=0,r=0,t=10,b=10))
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+# ---- Reliability panel (compact)
+def render_reliability_panel(freshness:dict, counts:dict, col_label="Feed"):
+    import pandas as pd
+    rows=[]
+    for name in ["news","gdelt","air","trends","reddit"]:
+        item = freshness.get(name, {"last":"—","age_min":None})
+        age = item.get("age_min")
+        if age is None:
+            chip = '<span class="chip chip-bad">stale</span>'
+        elif age <= 60:
+            chip = '<span class="chip chip-ok">fresh</span>'
+        elif age <= 240:
+            chip = '<span class="chip chip-warn">lagging</span>'
+        else:
+            chip = '<span class="chip chip-bad">stale</span>'
+        rows.append([name, counts.get(name,0), item.get("last","—"), age if age is not None else "—", chip])
+    df = pd.DataFrame(rows, columns=[col_label,"Items","Last Update (UTC)","Age (min)","Status"])
+    st.dataframe(df, use_container_width=True, height=240, column_config={"Status": st.column_config.TextColumn()})
+def render_region_risk_tiles(rr: pd.DataFrame):
+    if rr is None or rr.empty:
+        st.write("No regional risk available.")
+        return
+    rr = rr.head(8)
+    cols = st.columns(len(rr))
+    for c, (_, row) in zip(cols, rr.iterrows()):
+        with c:
+            st.markdown(f"""
+            <div class="kpi-card" style="text-align:center;">
+              <div class="kpi-label">{row['region']}</div>
+              <div class="kpi-value">{round(float(row['risk']),2)}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 
