@@ -140,10 +140,10 @@ with tab_overview:
     render_alert_strip(alerts)
 
     # 2) Scorecard (highlighted box)
-    render_section_header(
-        "Scorecard",
-        "Early Warning Index blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies; higher means more concerning."
-    )
+ render_section_header(
+    "Strategic Highlights",
+    "Early Warning blends risk (0–10), negative–positive emotion tilt, event velocity, and mobility anomalies."
+)
     begin_card()
     from src.ui import render_kpi_row_intel  # safe if already imported elsewhere
     render_kpi_row_intel(kpis)
