@@ -110,10 +110,17 @@ kpis = aggregate_kpis(
 )
 kpis = extend_kpis_with_intel(kpis, news_df, gdelt_df if not gdelt_df.empty else None, air_df)
 
+# Action bar — neatly grouped & centered
+st.markdown(
+    '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; margin:10px 0 6px;">',
+    unsafe_allow_html=True
+)
 download_buttons(
     news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df,
     air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
 )
+st.markdown('</div>', unsafe_allow_html=True)
+
 
 # --- Reliability & Alerts ---
 freshness = compute_data_freshness(
