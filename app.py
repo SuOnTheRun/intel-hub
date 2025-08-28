@@ -116,10 +116,8 @@ def psychological_state_index_delta(df):
 
 def engagement_friction_delta(reddit_df):
     """
-    Reddit-only (real data): friction ~ impressions-to-action proxy.
-    score ~ impressions/approval, comments ~ action.
-    Friction = score / (comments+1). Higher => more passive; lower => more discussion/action.
-    Compares last 24h vs prior 24h.
+    Friction = score / (comments+1). Higher => more passive; lower => more action.
+    Returns last 24h vs prior 24h.
     """
     if reddit_df is None or getattr(reddit_df, "empty", True):
         return {"current": 0.0, "delta": 0.0}
@@ -131,20 +129,14 @@ def engagement_friction_delta(reddit_df):
         if x is None or x.empty:
             return 0.0
         s = x.copy()
-
-        # Always work with Series (fallback = zeros Series with same index)
         zero = pd.Series(0.0, index=s.index)
         score = pd.to_numeric(s["score"], errors="coerce") if "score" in s.columns else zero
         comments = pd.to_numeric(s["num_comments"], errors="coerce") if "num_comments" in s.columns else zero
+        return float((score.fillna(0.0) / (comments.fillna(0.0) + 1.0)).mean())
 
-        score = score.fillna(0.0)
-        comments = comments.fillna(0.0)
-
-        return float((score / (comments + 1.0)).mean())
-
-    cur = _fric(last)
-    base = _fric(prev)
+    cur = _fric(last); base = _fric(prev)
     return {"current": round(cur, 3), "delta": round(cur - base, 3)}
+
 
 # --- Psychology console (validation vs action vs next step) ---
 _VAL_WORDS = set("""
