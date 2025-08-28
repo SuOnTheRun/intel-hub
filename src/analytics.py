@@ -488,3 +488,50 @@ def detect_overview_alerts(kpis, freshness, thresholds=None):
         alerts.append("No critical alerts in the selected window")
 
     return alerts
+# ---------- Freshness & region risk helpers ----------
+def _pick_time_col_generic(df):
+    if df is None or getattr(df, "empty", True):
+        return None
+    for c in ["published","published_at","date","datetime","timestamp","time","ts","created_utc","created","created_at"]:
+        if c in df.columns:
+            return c
+    return None
+
+def compute_data_freshness(news=None, gdelt=None, air=None, trends=None, reddit=None):
+    """
+    Returns dict {feed: {'last': iso or '—', 'age_min': float or None}}
+    """
+    out = {}
+    items = {"news": news, "gdelt": gdelt, "air": air, "trends": trends, "reddit": reddit}
+    for name, df in items.items():
+        if df is None or getattr(df, "empty", True):
+            out[name] = {"last": "—", "age_min": None}
+            continue
+        col = _pick_time_col_generic(df)
+        if col is None:
+            out[name] = {"last": "—", "age_min": None}
+            continue
+        s = df.copy()
+        s[col] = pd.to_datetime(s[col], errors="coerce", utc=True)
+        s = s.dropna(subset=[col])
+        if s.empty:
+            out[name] = {"last": "—", "age_min": None}
+            continue
+        last = s[col].max()
+        age = (pd.Timestamp.utcnow().tz_localize("UTC") - last).total_seconds() / 60.0
+        out[name] = {"last": str(last), "age_min": round(age, 1)}
+    return out
+
+def region_risk_table(df):
+    """
+    Average risk per region for simple tiles when maps are empty.
+    Returns a sorted dataframe with columns ['region','risk'].
+    """
+    if df is None or getattr(df, "empty", True) or "region" not in df.columns:
+        return pd.DataFrame(columns=["region","risk"])
+    s = df.copy()
+    if "risk_score" not in s.columns:
+        s["risk_score"] = 0.0
+    g = s.groupby("region")["risk_score"].mean().reset_index()
+    g.rename(columns={"risk_score":"risk"}, inplace=True)
+    return g.sort_values("risk", ascending=False)
