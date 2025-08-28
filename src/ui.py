@@ -9,25 +9,21 @@ import numpy as np
 
 
 
+
 def render_alert_strip(alerts: list[str]):
     if not alerts:
         return
     safe = " • ".join(escape(a) for a in alerts)
     st.markdown(
-        """
-        <div style="
-            background:#0E1117;
-            border:1px solid #2A2F3A;
-            padding:10px 14px;
-            border-radius:12px;
-            font-size:14px;">
-        <b>Alerts</b> — """ + safe + "</div>",
+        f"""<div class="alert-strip"><b>Alerts</b> — {safe}</div>""",
         unsafe_allow_html=True,
     )
 
 
 
-def render_reliability_panel(freshness: dict, counts: dict, col_label="Feed"):
+
+def render_reliability_panel(freshness: dict, src_counts: dict, col_label="Feed"):
+
     """
     Small table: source freshness + counts so the overview feels reliable.
     """
@@ -95,28 +91,42 @@ def render_event_cards_with_emotion(df, title, n=12):
                 st.link_button("Open source", url)
 
 
+import plotly.graph_objects as go
+
 def render_kpi_row_intel(kpis):
-    # Row 1: your current KPIs
+    # Row 1 (operational)
     cols1 = st.columns(5)
-    cols1[0].metric("Intelligence Reports", kpis.get("intelligence_reports", "—"))
-    cols1[1].metric("Movement Detections", kpis.get("movement_detections", "—"))
-    cols1[2].metric("High-Risk Regions", kpis.get("high_risk_regions", "—"))
-    cols1[3].metric("Aircraft Tracked", kpis.get("aircraft_tracked", "—"))
-    cols1[4].metric("Avg Risk Score", kpis.get("avg_risk_score", "—"))
+    cols1[0].metric("Intelligence Reports", kpis.get("intelligence_reports", "—"),
+                    help="Number of distinct intelligence items after deduplication in the selected time window.")
+    cols1[1].metric("Movement Detections", kpis.get("movement_detections", "—"),
+                    help="Movement events detected across mobility sources (OpenSky and others).")
+    cols1[2].metric("High-Risk Regions", kpis.get("high_risk_regions", "—"),
+                    help="Regions whose mean risk score exceeds the high-risk threshold.")
+    cols1[3].metric("Aircraft Tracked", kpis.get("aircraft_tracked", "—"),
+                    help="Unique aircraft observed in the current window.")
+    cols1[4].metric("Avg Risk Score", kpis.get("avg_risk_score", "—"),
+                    help="Mean risk across events (0–10).")
 
-    # Row 2: new intelligence KPIs
+    # Row 2 (strategic)
     cols2 = st.columns(4)
-    cols2[0].metric("Early Warning Index", kpis.get("early_warning", 0.0))
-    cols2[1].metric("Event Velocity (per hr)", kpis.get("event_velocity", 0.0))
-    cols2[2].metric("Mobility Anomalies", kpis.get("mobility_anomalies", 0))
-    cols2[3].metric("Dominant Emotion", kpis.get("emo_dominant_top", "—"))
+    cols2[0].metric("Early Warning Index", kpis.get("early_warning", 0.0),
+                    help="Composite: 35% risk, 25% emotion tilt (fear+anger+sadness vs joy+trust), 25% velocity, 15% mobility anomalies.")
+    cols2[1].metric("Event Velocity (per hr)", kpis.get("event_velocity", 0.0),
+                    help="Average events/hour over the latest 24 hourly buckets.")
+    cols2[2].metric("Mobility Anomalies", kpis.get("mobility_anomalies", 0),
+                    help="Proxy: unique aircraft vs density heuristic in region.")
+    cols2[3].metric("Dominant Emotion", kpis.get("emo_dominant_top", "—"),
+                    help="Most frequent dominant emotion across events in window.")
 
-    # Emotion mix mini-bar
+    # Emotion mix mini-bar (muted palette)
     labels = ["Anger","Antic.","Disgust","Fear","Joy","Sadness","Surprise","Trust"]
-    mix = [kpis.get(f"emo_{k.lower()}", 0.0) for k in ["Anger","Anticipation","Disgust","Fear","Joy","Sadness","Surprise","Trust"]]
-    fig = go.Figure(go.Bar(x=labels, y=mix))
-    fig.update_layout(height=180, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+    mix = [kpis.get(f"emo_{k.lower()}", 0.0) for k in
+           ["Anger","Anticipation","Disgust","Fear","Joy","Sadness","Surprise","Trust"]]
+    fig = go.Figure(go.Bar(x=labels, y=mix,
+                           marker=dict(color=["#7f8aa3","#c1a05a","#9aa8b2","#c4876b","#67a99a","#a78fa3","#9db1c7","#8fb08c"])))
+    fig.update_layout(height=220, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
 
 def render_section_header(title: str, note: str | None = None):
     """Elegant section header with a right-aligned footnote line."""
@@ -234,12 +244,16 @@ def render_event_cards_with_emotion(df, title, n=12):
 
 
 def render_header():
-    st.markdown("""
-    <div style="padding:10px 6px 0 6px">
-      <h2 style="margin-bottom:4px; font-weight:700; letter-spacing:.2px;">STRATEGIC <span style="color:#111">INTELLIGENCE WAR ROOM</span></h2>
-      <div style="color:#666; font-size:13px; margin-top:-6px;">Professional global intelligence & movement tracking</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="hero">
+          <div class="hero-title">STRATEGIC INTELLIGENCE WAR ROOM</div>
+          <div class="hero-sub">Global intelligence center · no fluff</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 def _kpi_card(title, value, subtitle=""):
     st.markdown(f"""
