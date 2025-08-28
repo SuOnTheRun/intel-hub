@@ -115,10 +115,14 @@ st.markdown(
     '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; margin:10px 0 6px;">',
     unsafe_allow_html=True
 )
-download_buttons(
-    news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df,
-    air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
-)
+# Action bar — centered with columns (robust, no HTML)
+_, center, _ = st.columns([1, 3, 1])
+with center:
+    download_buttons(
+        news_df=news_df, gdelt_df=gdelt_df, markets_df=markets_df,
+        air_df=air_df, trends_df=trends_df, reddit_df=reddit_df
+    )
+
 st.markdown('</div>', unsafe_allow_html=True)
 
 
