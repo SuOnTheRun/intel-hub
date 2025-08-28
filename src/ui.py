@@ -4,6 +4,7 @@ import plotly.express as px
 
 import plotly.graph_objects as go
 import streamlit as st
+from html import escape
 
 
 def render_alert_strip(alerts: list[str]):
@@ -12,19 +13,20 @@ def render_alert_strip(alerts: list[str]):
     """
     if not alerts:
         return
-    with st.container():
-        st.markdown(
-            """
-            <div style="
-                background:#0E1117;
-                border:1px solid #2A2F3A;
-                padding:10px 14px;
-                border-radius:12px;
-                font-size:14px;
-            ">
-            <b>Alerts</b> — """ + " • ".join([st._escape_markdown(a) for a in alerts]) + "</div>",
-            unsafe_allow_html=True,
-        )
+    safe = " • ".join(escape(a) for a in alerts)
+    st.markdown(
+        """
+        <div style="
+            background:#0E1117;
+            border:1px solid #2A2F3A;
+            padding:10px 14px;
+            border-radius:12px;
+            font-size:14px;
+        ">
+        <b>Alerts</b> — """ + safe + "</div>",
+        unsafe_allow_html=True,
+    )
+
 
 def render_reliability_panel(freshness: dict, counts: dict, col_label="Feed"):
     """
