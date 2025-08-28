@@ -5,12 +5,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from html import escape
+import numpy as np
+
 
 
 def render_alert_strip(alerts: list[str]):
-    """
-    Compact, high-contrast alert strip under the header.
-    """
     if not alerts:
         return
     safe = " • ".join(escape(a) for a in alerts)
@@ -21,11 +20,11 @@ def render_alert_strip(alerts: list[str]):
             border:1px solid #2A2F3A;
             padding:10px 14px;
             border-radius:12px;
-            font-size:14px;
-        ">
+            font-size:14px;">
         <b>Alerts</b> — """ + safe + "</div>",
         unsafe_allow_html=True,
     )
+
 
 
 def render_reliability_panel(freshness: dict, counts: dict, col_label="Feed"):
@@ -118,6 +117,100 @@ def render_kpi_row_intel(kpis):
     fig = go.Figure(go.Bar(x=labels, y=mix))
     fig.update_layout(height=180, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+def render_section_header(title: str, note: str | None = None):
+    """Elegant section header with a right-aligned footnote line."""
+    note_html = f'<div class="section-note">* {escape(note)}</div>' if note else ""
+    st.markdown(
+        f"""
+        <div class="section-head">
+          <div class="section-title">{escape(title)}</div>
+          {note_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def begin_card():
+    st.markdown('<div class="soft-card">', unsafe_allow_html=True)
+
+def end_card():
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def render_top_events_split(df, n=20, title="Top Events"):
+    """Left: compact table of headlines. Right: one aggregate emotion bar."""
+    if df is None or df.empty:
+        render_section_header(title, "Headlines deduplicated by similarity; risk is modelled, not raw mentions.")
+        st.info("No events in the selected window.")
+        return
+
+    show = df.copy().head(n)
+    # choose time column and compute 'Age (min)'
+    tcol = next((c for c in ["published","published_at","date","datetime","timestamp","time","ts"] if c in show.columns), None)
+    if tcol:
+        show["_dt"] = pd.to_datetime(show[tcol], errors="coerce", utc=True)
+        now = pd.Timestamp.utcnow()
+        show["Age (min)"] = ((now - show["_dt"]).dt.total_seconds() / 60.0).round(0)
+
+    cols = st.columns([2.2, 1])  # left wide, right narrow
+
+    with cols[0]:
+        render_section_header(title, "Each row is a deduped event: Region · Topic · Risk · Source · Age.")
+        tbl = show.rename(columns={
+            "title":"Headline","risk_score":"Risk","topic":"Topic","region":"Region",
+            "source":"Source","provider":"Source","site":"Source","domain":"Source","url":"Source Link"
+        })
+        keep = [c for c in ["Headline","Risk","Topic","Region","Source","Age (min)","Source Link"] if c in tbl.columns]
+        tbl = tbl[keep]
+        st.dataframe(
+            tbl,
+            use_container_width=True, hide_index=True, height=440,
+            column_config={
+                "Risk": st.column_config.NumberColumn(format="%.1f"),
+                "Age (min)": st.column_config.NumberColumn(format="%.0f"),
+                "Source Link": st.column_config.LinkColumn(display_text="Open")
+            },
+        )
+
+    with cols[1]:
+        render_section_header("Emotion Mix (Selected)", "Mean of Fear/Anger/Sadness vs Joy/Trust across listed headlines.")
+        emo_cols = [f"emo_{k}" for k in ["fear","anger","sadness","joy","trust"]]
+        for c in emo_cols:
+            if c not in show.columns:
+                show[c] = 0.0
+        mix = [float(show[c].mean()) for c in emo_cols]
+        fig = go.Figure(go.Bar(x=["Fear","Anger","Sadness","Joy","Trust"], y=mix))
+        fig.update_layout(height=300, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+def render_reliability_panel(freshness: dict, src_counts: dict):
+    """Clear, compact reliability readout with chips + table."""
+    if not freshness:
+        return
+    # chips
+    chips = []
+    for key, meta in freshness.items():
+        age = meta.get("age_min")
+        count = meta.get("count", 0)
+        if age is None:
+            chips.append(f"{escape(key.title())}: {count} items")
+        else:
+            chips.append(f"{escape(key.title())}: {count} • {int(age)}m")
+    st.markdown(
+        '<div class="chip-row">' + " ".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>",
+        unsafe_allow_html=True,
+    )
+    # table
+    rows = []
+    for name, meta in freshness.items():
+        rows.append({
+            "Feed": name,
+            "Items": meta.get("count"),
+            "Last Update (UTC)": str(meta.get("last_ts")) if meta.get("last_ts") is not None else "—",
+            "Age (min)": meta.get("age_min") if meta.get("age_min") is not None else "—",
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
 
 def render_event_cards_with_emotion(df, title, n=12):
     if df is None or df.empty:
