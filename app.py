@@ -301,7 +301,7 @@ tab_overview, tab_regions, tab_feed, tab_mobility, tab_markets, tab_social = st.
 
 # ---------------- Tab bodies ----------------
 with tab_overview:
-    # ---- Alerts strip (simple examples; adjust thresholds as you wish)
+    # ---- Alerts strip (simple examples; adjust thresholds if you like)
     alerts = []
     if kpis.get("mobility_anomalies", 0) > 500:
         alerts.append(f"Mobility anomalies elevated (≈{kpis['mobility_anomalies']})")
@@ -329,18 +329,16 @@ with tab_overview:
     # ---- Topic Influence (single elegant panel; no clutter)
     render_topic_influence(events_all, title="Topic Influence (by Risk × Emotion)")
 
-    # ---- Risk / Mobility Heat (GDELT if available, else air-traffic)
-        render_section_header(
+    # ---- Risk / Mobility Heat (map when present; tiles fallback otherwise)
+    render_section_header(
         "Risk / Mobility Heat",
         "* GDELT risk heat when available; else air-traffic; else region risk tiles."
     )
     from src.presets import region_center
     from src.maps import render_risk_or_map
-    events_all = pd.concat([news_df, gdelt_df], ignore_index=True) if not gdelt_df.empty else news_df
     render_risk_or_map(gdelt_df, air_df, region_center(region), events_all)
 
-
-    # ---- Signal Reliability  (real freshness — see Step 4)
+    # ---- Signal Reliability (compact)
     render_section_header(
         "Signal Reliability",
         "* Counts and last-update age for each feed (minutes since latest timestamp)."
