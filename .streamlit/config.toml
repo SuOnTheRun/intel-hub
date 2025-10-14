@@ -6,7 +6,7 @@ address = "0.0.0.0"
 
 [theme]
 base = "light"
-primaryColor = "#bfa66b"     # executive gold
-backgroundColor = "#f7f7f5"  # porcelain
+primaryColor = "#0fb39b"     # Blis mint/teal accent
+backgroundColor = "#f6f7f8"  # porcelain
 secondaryBackgroundColor = "#ffffff"
-textColor = "#0f0f10"
+textColor = "#101113"
