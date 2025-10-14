@@ -5,6 +5,8 @@ import streamlit as st
 import plotly.express as px
 from dateutil import tz
 from datetime import datetime
+import yfinance as yf
+
 
 from src.theming import inject_css, kpi
 from src.collectors import (
