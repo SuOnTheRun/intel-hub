@@ -134,3 +134,10 @@ def estimated_feed_size() -> int:
         try: n += len(feedparser.parse(u).entries)
         except Exception: pass
     return n
+# --- Backward-compat aliases for existing app.py imports ---
+def news_z(headlines):
+    # Use dynamic baseline derived from current feed size
+    return news_z_dynamic(headlines, estimated_feed_size())
+
+def ccs(news_z_v, s_avg, trends_delta, market_norm):
+    return ccs_simple(news_z_v, s_avg, trends_delta, market_norm)
