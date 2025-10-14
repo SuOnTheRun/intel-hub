@@ -136,8 +136,9 @@ def estimated_feed_size() -> int:
     return n
 # --- Backward-compat aliases for existing app.py imports ---
 def news_z(headlines):
-    # Use dynamic baseline derived from current feed size
+    from .collectors import news_z_dynamic, estimated_feed_size
     return news_z_dynamic(headlines, estimated_feed_size())
 
 def ccs(news_z_v, s_avg, trends_delta, market_norm):
+    from .collectors import ccs_simple
     return ccs_simple(news_z_v, s_avg, trends_delta, market_norm)
