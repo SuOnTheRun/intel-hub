@@ -1,0 +1,41 @@
+{
+  "Policy_and_Regulators": {
+    "Federal_Reserve": "https://www.federalreserve.gov/feeds/speeches.xml",
+    "ECB": "https://www.ecb.europa.eu/rss/press.html",
+    "Bank_of_England": "https://www.bankofengland.co.uk/news/rss",
+    "RBI": "https://www.rbi.org.in/Shared/Scripts/NewsRSS.ashx",
+    "US_Commerce": "https://www.commerce.gov/news/rss.xml",
+    "European_Commission": "https://ec.europa.eu/commission/presscorner/rss",
+    "WTO": "https://www.wto.org/english/news_e/news_e.rss",
+    "UK_Gov_Announcements": "https://www.gov.uk/government/announcements.atom",
+    "SEC_8K": "https://www.sec.gov/rss/rssfeed.rss"
+  },
+  "Macro_and_Earnings": {
+    "TradingEconomics_API": "https://api.tradingeconomics.com/calendar",
+    "Investing_com_Calendar": "https://www.investing.com/economic-calendar/",
+    "ForexFactory_Calendar": "https://www.forexfactory.com/calendar"
+  },
+  "Geo_Disaster": {
+    "USGS_Quakes": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom",
+    "EMSC_Quakes": "https://www.emsc-csem.org/service/rss/rss.php?typ=emsc",
+    "GDACS_Alerts": "https://www.gdacs.org/xml/rss.xml",
+    "ReliefWeb": "https://reliefweb.int/updates?format=10",
+    "NASA_FIRMS": "https://firms.modaps.eosdis.nasa.gov/active_fire/#firms-txt"
+  },
+  "Cybersecurity": {
+    "CISA_Current_Activity": "https://www.cisa.gov/news-events/cybersecurity-advisories/alerts.xml",
+    "NVD_CVE": "https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss.xml",
+    "CERT_EU": "https://cert.europa.eu/public/feeds/all.xml",
+    "Krebs_on_Security": "https://krebsonsecurity.com/feed/"
+  },
+  "HUMINT_Social": {
+    "HackerNews_Top": "https://news.ycombinator.com/rss",
+    "Reddit_Config_File": "src/social_sources.json"
+  },
+  "Mobility_Signals": {
+    "OpenSky_API": "https://opensky-network.org/api",
+    "ADS_B_Exchange": "https://www.adsbexchange.com/data/",
+    "MarineTraffic": "https://www.marinetraffic.com/",
+    "VesselFinder": "https://www.vesselfinder.com/"
+  }
+}
