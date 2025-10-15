@@ -1,9 +1,16 @@
 # app.py — Intelligence Hub (lightweight build; Milestone 1 ready)
 
+import os, sys
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+# --- Ensure we can import from ./src even if the package init is missing/misplaced ---
+# (Keep this even after adding src/__init__.py; it's a harmless safety belt.)
+SRC_DIR = os.path.join(os.path.dirname(__file__), "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
 # Browser timezone detection (no IP lookup)
 try:
@@ -11,15 +18,25 @@ try:
 except Exception:
     st_javascript = None
 
-# --- Project modules ---
-from src.collectors import get_news_dataframe
-from src.emotions import add_sentiment
-from src.data_sources import category_metrics
-from src.analytics import build_category_heatmap, headline_blocks
-from src.ui import kpi_cards, heatmap, headlines_section, narratives_panel, tension_panel
-from src.narratives import build_narratives
-from src.entities import extract_entities
-from src.risk_model import compute_tension
+# Try package-style imports first; fall back to module files in ./src if needed
+try:
+    from src.collectors import get_news_dataframe
+    from src.emotions import add_sentiment
+    from src.data_sources import category_metrics
+    from src.analytics import build_category_heatmap, headline_blocks
+    from src.ui import kpi_cards, heatmap, headlines_section, narratives_panel, tension_panel
+    from src.narratives import build_narratives
+    from src.entities import extract_entities
+    from src.risk_model import compute_tension
+except Exception:
+    from collectors import get_news_dataframe
+    from emotions import add_sentiment
+    from data_sources import category_metrics
+    from analytics import build_category_heatmap, headline_blocks
+    from ui import kpi_cards, heatmap, headlines_section, narratives_panel, tension_panel
+    from narratives import build_narratives
+    from entities import extract_entities
+    from risk_model import compute_tension
 
 # -----------------------------
 # Page configuration
@@ -124,12 +141,12 @@ headlines_section(blocks)
 st.markdown("---")
 st.header("HUMINT Deep-Dive")
 
-# 1) Narratives (pure-sklearn fallback active on lightweight build)
+# 1) Narratives
 with st.spinner("Deriving narratives…"):
     narr = build_narratives(news_df, top_n=3)
 narratives_panel(narr.table, narr.top_docs_by_cat)
 
-# 2) Entities (falls back to heuristic if spaCy unavailable)
+# 2) Entities
 with st.spinner("Extracting entities…"):
     ent_df = extract_entities(news_df, top_n=8)
 st.subheader("Prominent Entities (ORG / PERSON / GPE)")
