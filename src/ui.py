@@ -24,3 +24,34 @@ def headlines_section(blocks: dict):
             continue
         for _, r in g.iterrows():
             st.markdown(f"- [{r['title']}]({r['link']})  \n  <span style='color:#6b7280;font-size:12px'>{r['source']} — {r['published_dt'].strftime('%d %b %Y %H:%M')}</span>", unsafe_allow_html=True)
+
+# append at bottom of src/ui.py
+
+def narratives_panel(narr_table: pd.DataFrame, top_docs: dict):
+    st.subheader("Narratives & Key Themes")
+    if narr_table.empty:
+        st.caption("No narratives detected yet.")
+        return
+    st.dataframe(narr_table[["category","narrative","n_docs","weight"]]
+                 .assign(weight=lambda d: (d["weight"]*100).round(1))
+                 .rename(columns={"weight":"Weight %","n_docs":"Docs"}), use_container_width=True)
+    with st.expander("Representative Headlines by Category"):
+        for cat, g in top_docs.items():
+            st.markdown(f"**{cat}**")
+            if g.empty:
+                st.caption("No samples.")
+                continue
+            for _, r in g.iterrows():
+                st.markdown(f"- [{r['title']}]({r['link']})")
+            st.markdown("---")
+
+def tension_panel(tension_df: pd.DataFrame):
+    st.subheader("Tension Index (0–100)")
+    if tension_df.empty:
+        st.caption("No tension signals available.")
+        return
+    st.dataframe(
+        tension_df[["category","tension_0_100","neg_density","sent_vol","news_z","market_drawdown","trends_norm","entity_intensity"]],
+        use_container_width=True
+    )
+
