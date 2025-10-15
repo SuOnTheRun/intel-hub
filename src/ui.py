@@ -27,6 +27,47 @@ def luxe_header(title: str, subtitle: str = ""):
         unsafe_allow_html=True,
     )
 
+# ---------- Alert Ribbon ----------
+def alert_ribbon(alerts: list, collapsed: bool = False, max_show: int = 18):
+    """
+    Displays alerts as elegant chips with subtle severity accents.
+    """
+    if not alerts:
+        return
+
+    def _badge(a):
+        color = "#0f766e"  # default
+        if a.kind in ("policy", "geo", "cyber"): color = "#334155"
+        if a.severity >= 4: color = "#b91c1c"  # high risk
+        if a.severity == 2: color = "#475569"
+        bg = "rgba(0,0,0,0.04)"
+        link = f"<a href='{a.link}' target='_blank' style='text-decoration:none;color:#0b132b'>" if a.link else "<span>"
+        end = "</a>" if a.link else "</span>"
+        return f"""
+        <span style="
+          display:inline-flex;align-items:center;gap:8px;
+          padding:6px 10px;margin:6px 6px 0 0;border-radius:999px;
+          background:{bg};border:1px solid #e5e7eb;">
+          <span style="width:8px;height:8px;border-radius:999px;background:{color};"></span>
+          <strong style="font-size:12px;color:#0b1221">{a.title}</strong>
+          {link}<span style="font-size:12px;color:#475569">{a.detail}</span>{end}
+        </span>
+        """
+
+    chips = "".join(_badge(a) for a in alerts[:max_show])
+    block = f"""
+    <div style="
+      margin:14px 0 8px 0;padding:10px 12px;border-radius:14px;
+      background:linear-gradient(180deg,#ffffff 0%,#f9fafb 100%);border:1px solid #e6e8ec;">
+      {chips}
+    </div>
+    """
+    if collapsed:
+        with st.expander("Alerts"):
+            st.markdown(block, unsafe_allow_html=True)
+    else:
+        st.markdown(block, unsafe_allow_html=True)
+
 # ---------- helpers ----------
 def _safe_mean(s: pd.Series, default=0.0):
     try:
@@ -40,15 +81,6 @@ def _fmt_delta(x: float) -> str:
 
 # ---------- KPI ribbon ----------
 def kpi_ribbon(heat_df: pd.DataFrame, tension_df: pd.DataFrame, news_df: pd.DataFrame):
-    """
-    Six intuitive indicators:
-      1) Market Move (avg 5d %)
-      2) News Momentum (z of volume)
-      3) Public Interest (Google Trends)
-      4) Negativity Density (% of headlines with negative tone)
-      5) Headline Tone (mean, −1…+1)
-      6) Tension Index (0–100)
-    """
     df = heat_df.copy()
     if not tension_df.empty:
         df = df.merge(tension_df[["category","tension_0_100"]], on="category", how="left")
@@ -137,18 +169,12 @@ def _top_driver(news_df: pd.DataFrame, category: str) -> str:
     return f' — on account of: “[{r["title"]}]({r["link"]})” ({r["source"]})'
 
 def _interesting_score(row) -> float:
-    # weight interesting categories for summary: news spike + tension + market move magnitude + absolute tone
     return abs(float(row.get("news_z", 0))) + abs(float(row.get("market_pct", 0))) / 2.0 + abs(float(row.get("sentiment", 0))) + float(row.get("tension_0_100", 0)) / 50.0
 
 def insights_summary(heat_df: pd.DataFrame, news_df: pd.DataFrame, tension_df: pd.DataFrame, max_items: int = 8):
-    """
-    Generates readable bullet statements per category:
-    "<Category> shows elevated news momentum and supportive tone with a short-term rally; heightened public interest — on account of: “<headline>” (Source)"
-    """
     if heat_df.empty:
         st.caption("No data available for a summary yet.")
         return
-
     df = heat_df.copy()
     if not tension_df.empty:
         df = df.merge(tension_df[["category","tension_0_100"]], on="category", how="left")
@@ -166,12 +192,10 @@ def insights_summary(heat_df: pd.DataFrame, news_df: pd.DataFrame, tension_df: p
             _label_move(float(r.get("market_pct", 0))),
             _label_trends(float(r.get("trends", 0))),
         ]
-        # remove duplicates like "normal newsflow" + "steady public interest" clutter
         parts = [p for p in parts if p not in ("normal newsflow","steady public interest")]
         clause = " and ".join(parts[:2]) + (", " + ", ".join(parts[2:]) if len(parts) > 2 else "")
         tension = r.get("tension_0_100", np.nan)
         tension_txt = f" (Tension: {float(tension):.0f})" if pd.notna(tension) else ""
-
         driver = _top_driver(news_df, cat)
         st.markdown(f"- **{cat}** shows {clause}{tension_txt}{driver}")
 
@@ -197,7 +221,7 @@ def heatmap_labeled(df: pd.DataFrame):
     fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
-# ---------- Headlines overview (paged + filterable) ----------
+# ---------- Headlines overview ----------
 def headlines_overview(news_df: pd.DataFrame, per_page: int = 12):
     if news_df.empty:
         st.caption("No headlines available.")
@@ -220,7 +244,7 @@ def headlines_overview(news_df: pd.DataFrame, per_page: int = 12):
             unsafe_allow_html=True
         )
 
-# ---------- Narratives & Tension tables ----------
+# ---------- Narratives & Tension ----------
 def narratives_panel(narr_table: pd.DataFrame, top_docs: dict):
     st.subheader("Narratives & Key Themes")
     if narr_table.empty:
