@@ -5,7 +5,7 @@ from src.theming import inject_css, kpi
 from src.collectors import (
     REGIONS, TOP_MARKETS, CATEGORIES,
     fetch_news, fetch_quotes, fetch_trends,
-    news_z_dynamic, senti_avg, emotion_avg, ccs_simple, estimated_feed_size
+    news_z_dynamic, senti_avg, emotion_avg, signals, day_counts, ccs_simple, estimated_feed_size
 )
 from src.secrets import REDDIT
 
@@ -40,19 +40,19 @@ def _quotes(symbols): return fetch_quotes(symbols)
 @st.cache_data(ttl=300, show_spinner=False)
 def _trends(cat, geo): return fetch_trends(cat, geo)
 
-def sentiment_hist(headlines):
+def draw_sentiment_hist(headlines):
     if not headlines: return
     df = pd.DataFrame([h["senti"] for h in headlines], columns=["sentiment"])
     fig = px.histogram(df, x="sentiment", nbins=24)
     st.plotly_chart(fig, use_container_width=True)
 
-def emotion_bar(emotions: dict):
+def draw_emotion_bar(emotions: dict):
     if not emotions: return
     df = pd.DataFrame({"emotion": list(emotions.keys()), "share": list(emotions.values())})
     fig = px.bar(df, x="emotion", y="share")
     st.plotly_chart(fig, use_container_width=True)
 
-def source_mix(headlines):
+def draw_source_mix(headlines):
     if not headlines: return
     df = pd.DataFrame(headlines)
     mix = df["source"].value_counts().reset_index()
@@ -60,10 +60,16 @@ def source_mix(headlines):
     fig = px.bar(mix, x="source", y="count")
     st.plotly_chart(fig, use_container_width=True)
 
+def draw_momentum(headlines):
+    df = day_counts(headlines)
+    if df.empty: return
+    fig = px.line(df, x="date", y="count")
+    st.plotly_chart(fig, use_container_width=True)
+
 # ------- PAGES --------
 if page == "Command Center":
     st.header("Command Center")
-    st.caption("Global pulse across categories from BBC / Al Jazeera / AP / DW / CNBC / FT / Reuters + NewsAPI; markets via Yahoo Finance.")
+    st.caption("Global pulse across categories from BBC / Al Jazeera / AP / DW / CNBC / FT / Reuters (+NewsAPI), with markets via Yahoo Finance.")
 
     feed_n = estimated_feed_size()
     tech = _news("technology", None, None)
@@ -84,11 +90,14 @@ if page == "Command Center":
 
     st.subheader("Top Headlines by Category")
     for slug,cfg in CATEGORIES.items():
-        items=_news(slug,None,None)[:8]
+        items=_news(slug,None,None)[:12]
         st.markdown(f"**{cfg['name']}**")
-        if not items: st.caption("No matching headlines right now."); continue
+        if not items: 
+            st.caption("No matching headlines right now."); 
+            continue
         for h in items:
-            st.write(f"- [{h['title']}]({h['link']}) — {h['source']} · Sent {h['senti']:.2f}")
+            tag = "↑" if h.get("opportunity") else ("!" if h.get("risk") else "•")
+            st.write(f"- {tag} [{h['title']}]({h['link']}) — {h['source']} · Sent {h['senti']:.2f}")
 
 elif page == "Regions":
     st.header("Regions")
@@ -96,20 +105,26 @@ elif page == "Regions":
     cat = category_select()
     feed_n = estimated_feed_size()
 
-    left, right = st.columns([1.3, 0.7])
+    left, right = st.columns([1.35, 0.65])
     with left:
         st.subheader("News & Sentiment")
         headlines = _news(cat, country, region)
         nz = news_z_dynamic(headlines, feed_n); sa = senti_avg(headlines)
-        c1,c2 = st.columns(2)
+        sig = signals(headlines)
+        c1,c2,c3 = st.columns(3)
         with c1: kpi("News z", f"{nz:.2f}")
         with c2: kpi("Sentiment", f"{sa:.2f}")
+        with c3: kpi("Signals", f"Risk {sig['risk']} · Opp {sig['opportunity']}", "headline-level flags")
         if headlines:
             df=pd.DataFrame(headlines)[["title","source","published","senti","link"]]
             st.dataframe(df, hide_index=True)
-            st.markdown("**Sentiment distribution**"); sentiment_hist(headlines)
-            st.markdown("**Emotion mix**"); emotion_bar(emotion_avg(headlines))
-            st.markdown("**Source mix**"); source_mix(headlines)
+            st.markdown("**7-day momentum**"); draw_momentum(headlines)
+            colA,colB = st.columns(2)
+            with colA:
+                st.markdown("**Sentiment distribution**"); draw_sentiment_hist(headlines)
+                st.markdown("**Source mix**"); draw_source_mix(headlines)
+            with colB:
+                st.markdown("**Emotion mix**"); draw_emotion_bar(emotion_avg(headlines))
         else:
             st.caption("No matching headlines for this scope.")
 
@@ -135,25 +150,28 @@ elif page == "Categories":
     headlines = _news(cat, country, region)
     nz=news_z_dynamic(headlines,feed_n); sa=senti_avg(headlines)
     q=_quotes(CATEGORIES[cat]["tickers"]); pct=q[0]["pct"] if q else 0.0
+    sig = signals(headlines)
 
     c1,c2,c3 = st.columns(3)
     with c1: kpi("News z", f"{nz:.2f}")
     with c2: kpi("Sentiment", f"{sa:.2f}")
     with c3: kpi("Market Δ%", f"{pct:.2f}%")
 
-    st.markdown("**News**")
     if headlines:
+        st.markdown("**News**")
         df=pd.DataFrame(headlines)[["title","source","published","senti","link"]]
         st.dataframe(df, hide_index=True)
+        st.caption(f"Signals: Risk {sig['risk']} · Opportunity {sig['opportunity']}")
+        st.markdown("**7-day momentum**"); draw_momentum(headlines)
         colA,colB = st.columns(2)
         with colA:
-            st.markdown("**Sentiment distribution**"); sentiment_hist(headlines)
-            st.markdown("**Source mix**"); source_mix(headlines)
+            st.markdown("**Sentiment distribution**"); draw_sentiment_hist(headlines)
+            st.markdown("**Source mix**"); draw_source_mix(headlines)
         with colB:
-            st.markdown("**Emotion mix**"); emotion_bar(emotion_avg(headlines))
+            st.markdown("**Emotion mix**"); draw_emotion_bar(emotion_avg(headlines))
+            # lightweight top-terms
             terms = pd.Series(" ".join([h["title"] for h in headlines]).lower().split()).value_counts().head(20)
-            st.markdown("**Top terms**")
-            st.write(", ".join([t for t in terms.index if len(t)>3]))
+            st.markdown("**Top terms**"); st.write(", ".join([t for t in terms.index if len(t)>3]))
     else:
         st.caption("No matching stories right now.")
 
@@ -192,13 +210,14 @@ elif page == "My Data":
             xls=pd.ExcelFile(f); st.write("Sheets:", xls.sheet_names)
             for s in xls.sheet_names[:3]:
                 df=pd.read_excel(xls,s); st.write(f"Preview — {s}"); st.dataframe(df.head(50))
-        st.success("Preview complete. Say “add ingest” and I’ll wire SQLite storage + overlays.")
+        st.success("Preview complete. Say “add ingest” to wire SQLite overlays.")
 
 else:
     st.header("Methods & Data Quality")
     st.markdown("""
-**Open sources**: BBC / Al Jazeera / AP / DW / CNBC / FT / Reuters (RSS) + NewsAPI, Yahoo Finance (`yfinance`), Google Trends (`pytrends`).  
+**Sources**: BBC / Al Jazeera / AP / DW / CNBC / FT / Reuters / Guardian / CNN (RSS) plus NewsAPI when available; markets via Yahoo Finance; optional Google Trends; Reddit (opt-in).  
 **Refresh**: cache TTL ≈ 5 minutes.  
-**Sentiment**: VADER on titles. **Emotions**: NRC lexicon (open) on titles/briefs.  
-**News z**: dynamic baseline from feed size (no hard-coded constants).  
+**Relevance**: category keyword hits + geo bonus + source weight; ranked by score and recency.  
+**Sentiment**: VADER on titles. **Emotions**: NRC lexicon. **Signals**: lightweight risk/opportunity lexicons.  
+**No placeholders**: every row originates from real open sources.
 """)
