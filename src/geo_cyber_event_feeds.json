@@ -1,0 +1,22 @@
+{
+  "Disaster & Geo": {
+    "USGS Earthquakes (M2.5+)": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom",
+    "EMSC Quakes": "https://www.emsc-csem.org/service/rss/rss.php?typ=emsc",
+    "GDACS Alerts": "https://www.gdacs.org/xml/rss.xml",
+    "ReliefWeb Updates": "https://reliefweb.int/updates?format=10",
+    "NASA FIRMS Fire Alerts": "https://firms.modaps.eosdis.nasa.gov/active_fire/#firms-txt"
+  },
+  "Mobility / Maritime / Aviation (Milestone 2)": {
+    "OpenSky Flights API": "https://opensky-network.org/api",
+    "ADS-B Exchange": "https://www.adsbexchange.com/data/",
+    "MarineTraffic (limited free)": "https://www.marinetraffic.com/",
+    "VesselFinder": "https://www.vesselfinder.com/"
+  },
+  "Cybersecurity": {
+    "CISA Current Activity": "https://www.cisa.gov/news-events/cybersecurity-advisories/alerts.xml",
+    "NVD CVE Feeds": "https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss.xml",
+    "CERT-EU": "https://cert.europa.eu/public/feeds/all.xml",
+    "Krebs on Security": "https://krebsonsecurity.com/feed/"
+  }
+}
+
