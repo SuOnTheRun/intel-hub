@@ -9,7 +9,6 @@ vaderSentiment==3.3.2
 pytrends==4.9.2
 praw==7.7.1
 python-dateutil==2.9.0.post0
-cachetools==5.3.3
 plotly==5.24.1
 openpyxl==3.1.5
 xlrd==2.0.1
