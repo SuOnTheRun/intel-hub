@@ -1,23 +1,11 @@
 services:
   - type: web
-    name: intelligence-hub
+    name: intel-hub
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
     autoDeploy: true
-    healthCheckPath: /
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.8
-      # Optional APIs — set these in the Render dashboard if/when you have them:
-      # - key: REDDIT_CLIENT_ID
-      #   value: yourvalue
-      # - key: REDDIT_CLIENT_SECRET
-      #   value: yourvalue
-      # - key: REDDIT_USER_AGENT
-      #   value: "intel-hub/1.0 by you"
-      # - key: OPENSKY_USERNAME
-      #   value: yourvalue
-      # - key: OPENSKY_PASSWORD
-      #   value: yourvalue
+      - key: PYTHONUNBUFFERED
+        value: "1"
