@@ -1,14 +1,93 @@
 {
-  "world_major": [
-    "http://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-    "https://www.reutersagency.com/feed/?best-topics=world&post_type=best"
+  "Consumer Staples": [
+    "https://news.google.com/rss/search?q=FMCG+OR+%22consumer+staples%22+OR+%22packaged+food%22+OR+%22household+products%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+FMCG+OR+%22consumer+staples%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:ft.com+%22consumer+goods%22+OR+%22household+products%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=%22food+prices%22+OR+%22inflation+basket%22+OR+%22staples+demand%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:thehindu.com+FMCG+OR+%22consumer+goods%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:livemint.com+FMCG+OR+%22consumer+goods%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
   ],
-  "business_tech": [
-    "https://feeds.reuters.com/reuters/businessNews",
-    "https://feeds.arstechnica.com/arstechnica/index",
-    "https://www.theverge.com/rss/index.xml",
-    "https://www.cnbc.com/id/10001147/device/rss/rss.html"
+  "Energy": [
+    "https://news.google.com/rss/search?q=oil+OR+gas+OR+OPEC+OR+LNG+OR+%22crude+prices%22+OR+refinery+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+oil+OR+gas+OR+OPEC+OR+energy+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=%22renewable+energy%22+OR+solar+OR+wind+OR+hydrogen+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:dw.com+energy+OR+%22coal%22+OR+%22renewable%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:aljazeera.com+energy+OR+OPEC+OR+oil+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Technology": [
+    "http://feeds.bbci.co.uk/news/technology/rss.xml",
+    "https://news.google.com/rss/search?q=AI+OR+%22artificial+intelligence%22+OR+semiconductor+OR+chip+OR+cloud+OR+SaaS+OR+cybersecurity+OR+data+centers+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:ft.com+technology+OR+semiconductor+OR+AI+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:techcrunch.com+AI+OR+cloud+OR+enterprise+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:arstechnica.com+AI+OR+security+OR+%22chip%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Automotive": [
+    "https://news.google.com/rss/search?q=automotive+OR+EV+OR+%22electric+vehicle%22+OR+battery+OR+autonomous+OR+hydrogen+car+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+auto+OR+EV+OR+car+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:bbc.com+%22electric+vehicle%22+OR+automotive+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:ft.com+automotive+OR+EV+OR+battery+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:electrek.co+%22electric+vehicle%22+OR+EV+OR+battery+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Financials": [
+    "https://news.google.com/rss/search?q=banking+OR+fintech+OR+payments+OR+NBFC+OR+lending+OR+insurance+OR+microfinance+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+bank+OR+finance+OR+fintech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:cnbc.com+bank+OR+markets+OR+fintech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=RBI+OR+%22monetary+policy%22+OR+repo+rate+OR+yield+curve+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:livemint.com+bank+OR+NBFC+OR+fintech+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Media & Advertising": [
+    "https://news.google.com/rss/search?q=advertising+OR+adtech+OR+%22media+spend%22+OR+CTV+OR+programmatic+OR+OOH+OR+retail+media+OR+martech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:campaignasia.com+advertising+OR+adtech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:adage.com+advertising+OR+CTV+OR+programmatic+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:adweek.com+advertising+OR+marketing+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:exchange4media.com+advertising+OR+adtech+OR+OOH+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Healthcare": [
+    "https://news.google.com/rss/search?q=healthcare+OR+pharma+OR+biotech+OR+vaccine+OR+FDA+OR+clinical+trial+OR+hospital+infrastructure+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+health+OR+pharma+OR+biotech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:who.int+news+OR+outbreak+OR+guidance+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:nature.com+health+OR+medicine+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:statnews.com+pharma+OR+biotech+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Telecom": [
+    "https://news.google.com/rss/search?q=telecom+OR+5G+OR+6G+OR+mobile+networks+OR+fiber+OR+broadband+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+telecom+OR+5G+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:ettelecom.com+5G+OR+telecom+OR+spectrum+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:bbc.com+telecom+OR+connectivity+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Retail & E-commerce": [
+    "https://news.google.com/rss/search?q=ecommerce+OR+retail+OR+%22consumer+spending%22+OR+D2C+OR+marketplace+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+retail+OR+ecommerce+OR+shopping+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:businessoffashion.com+retail+OR+ecommerce+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:techcrunch.com+commerce+OR+delivery+OR+retail+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Defense & Security": [
+    "https://news.google.com/rss/search?q=defense+OR+military+OR+%22national+security%22+OR+geopolitics+OR+war+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:defensenews.com+defense+OR+military+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:bbc.com+military+OR+defense+OR+conflict+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://news.google.com/rss/search?q=site:reuters.com+security+OR+conflict+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Real Estate": [
+    "https://news.google.com/rss/search?q=%22real+estate%22+OR+property+OR+housing+OR+REIT+OR+construction+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+real+estate+OR+housing+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:livemint.com+real+estate+OR+property+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:moneycontrol.com+real+estate+OR+housing+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Metals & Mining": [
+    "https://news.google.com/rss/search?q=metals+OR+mining+OR+steel+OR+copper+OR+aluminium+OR+coal+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+mining+OR+metals+OR+commodities+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:ft.com+commodities+OR+metals+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Agriculture": [
+    "https://news.google.com/rss/search?q=agriculture+OR+%22crop+output%22+OR+fertilizer+OR+%22food+grain%22+OR+monsoon+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+agriculture+OR+farming+OR+crop+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:faonewsroom.org+agriculture+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  "Climate & ESG": [
+    "https://news.google.com/rss/search?q=climate+change+OR+ESG+OR+sustainability+OR+carbon+emission+OR+%22net+zero%22+OR+renewable+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:reuters.com+climate+OR+sustainability+OR+ESG+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:bbc.com+climate+OR+environment+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=site:dw.com+climate+OR+ESG+OR+carbon+when:2d&hl=en-IN&gl=IN&ceid=IN:en"
   ]
 }
