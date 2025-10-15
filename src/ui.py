@@ -1,4 +1,4 @@
-# src/ui.py — refined UI components for Intelligence Hub (no extra deps)
+# src/ui.py — refined UI components (lightweight, no extra deps)
 
 import streamlit as st
 import pandas as pd
@@ -26,56 +26,84 @@ def luxe_header(title: str, subtitle: str = ""):
         unsafe_allow_html=True,
     )
 
-
-# ---------- KPI ribbon ----------
+# ---------- helpers ----------
 def _safe_mean(s: pd.Series, default=0.0):
     try:
         return float(s.mean())
     except Exception:
         return default
 
-def kpi_ribbon(heat_df: pd.DataFrame, tension_df: pd.DataFrame):
+# ---------- KPI ribbon ----------
+def kpi_ribbon(heat_df: pd.DataFrame, tension_df: pd.DataFrame, news_df: pd.DataFrame):
     """
-    Shows six intuitive indicators:
+    Six intuitive indicators:
       1) Market Move (avg 5d %)
       2) News Momentum (z of volume)
       3) Public Interest (Google Trends)
-      4) Negativity Density (% of headlines < -0.2)
-      5) Sentiment (avg compound)
+      4) Negativity Density (% of headlines with negative tone)
+      5) Headline Tone (mean, −1…+1)
       6) Tension Index (0–100)
     """
-    # join for access
     df = heat_df.copy()
     if not tension_df.empty:
-        df = df.merge(tension_df[["category","tension_0_100","neg_density"]], on="category", how="left")
-    # "All categories" aggregates
+        df = df.merge(tension_df[["category","tension_0_100"]], on="category", how="left")
+
     market_move = _safe_mean(df["market_pct"])
     news_momentum = _safe_mean(df["news_z"])
     interest = _safe_mean(df["trends"])
-    negativity = _safe_mean(df["neg_density"]) if "neg_density" in df else 0.0
-    sentiment = _safe_mean(df["sentiment"])
-    tension = _safe_mean(df["tension_0_100"]) if "tension_0_100" in df else 0.0
+    # Compute negativity directly from headlines to avoid scaling issues
+    if news_df is not None and not news_df.empty and "sentiment" in news_df.columns:
+        negativity = float((news_df["sentiment"] < -0.2).mean()) * 100.0
+        headline_tone = float(news_df["sentiment"].mean())
+    else:
+        negativity = 0.0
+        headline_tone = 0.0
+    tension = _safe_mean(df.get("tension_0_100", pd.Series([0])))
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Market Move (5d %)", f"{market_move:.2f}")
     c2.metric("News Momentum (z)", f"{news_momentum:.2f}")
     c3.metric("Public Interest (Trends)", f"{interest:.1f}")
-    c4.metric("Negativity Density (%)", f"{negativity*100:.1f}")
-    c5.metric("Sentiment (−1…+1)", f"{sentiment:.2f}")
+    c4.metric("Negativity Density (%)", f"{negativity:.1f}")
+    c5.metric("Headline Tone (−1…+1)", f"{headline_tone:.2f}")
     c6.metric("Tension Index (0–100)", f"{tension:.1f}")
 
     with st.expander("What do these indicators mean?"):
         st.markdown(
             """
-            - **Market Move (5d %)** — Average five-day percent change across each category’s proxy tickers/ETFs.  
-            - **News Momentum (z)** — Z-score of story volume vs other categories in the last 24–72h. Positive = unusually busy.  
+            - **Market Move (5d %)** — Average five-day percent change across each category’s mapped tickers/ETFs.  
+            - **News Momentum (z)** — How unusually busy the news flow is (z-score of volume) over 24–72h.  
             - **Public Interest (Trends)** — Google Trends (0–100) averaged across search terms per category.  
-            - **Negativity Density (%)** — Share of headlines with negative sentiment (< −0.2).  
-            - **Sentiment (−1…+1)** — Mean compound sentiment of headlines (VADER on this build).  
-            - **Tension Index (0–100)** — Composite risk read (negativity, drawdown, volatility, news, trends, entities).
+            - **Negativity Density (%)** — Share of headlines with noticeably negative tone (compound < −0.2).  
+            - **Headline Tone (−1…+1)** — Average tone of headlines; near 0 = mixed, positive = supportive, negative = risk-off.  
+            - **Tension Index (0–100)** — Composite risk signal from negativity, drawdown, volatility, news, trends, and entity intensity.
             """
         )
 
+# ---------- Executive highlights ----------
+def highlights_panel(heat_df: pd.DataFrame, tension_df: pd.DataFrame):
+    if heat_df.empty:
+        return
+    df = heat_df.copy()
+    high_tension = None
+    if not tension_df.empty:
+        high_tension = tension_df.sort_values("tension_0_100", ascending=False).head(1)
+    top_momentum = df.sort_values("news_z", ascending=False).head(1)
+    most_negative = df.sort_values("sentiment", ascending=True).head(1)
+    biggest_move = df.iloc[[df["market_pct"].abs().argmax()]] if len(df) else df.head(0)
+    top_interest = df.sort_values("trends", ascending=False).head(1)
+
+    st.subheader("Highlights")
+    col = st.columns(5)
+    col[0].metric("Top News Momentum", f"{top_momentum['category'].values[0] if len(top_momentum) else '—'}", f"{top_momentum['news_z'].values[0]:.2f}" if len(top_momentum) else "0.00")
+    col[1].metric("Highest Tension", f"{high_tension['category'].values[0] if (high_tension is not None and len(high_tension)) else '—'}",
+                  f"{high_tension['tension_0_100'].values[0]:.1f}" if (high_tension is not None and len(high_tension)) else "0.0")
+    col[2].metric("Most Negative Tone", f"{most_negative['category'].values[0] if len(most_negative) else '—'}",
+                  f"{most_negative['sentiment'].values[0]:.2f}" if len(most_negative) else "0.00")
+    col[3].metric("Biggest Market Move", f"{biggest_move['category'].values[0] if len(biggest_move) else '—'}",
+                  f"{biggest_move['market_pct'].values[0]:.2f}%" if len(biggest_move) else "0.00%")
+    col[4].metric("Interest Spike", f"{top_interest['category'].values[0] if len(top_interest) else '—'}",
+                  f"{top_interest['trends'].values[0]:.1f}" if len(top_interest) else "0.0")
 
 # ---------- Heatmap (labeled) ----------
 def heatmap_labeled(df: pd.DataFrame):
@@ -85,7 +113,7 @@ def heatmap_labeled(df: pd.DataFrame):
     show = df[["category","news_z","sentiment","market_pct","trends"]].copy()
     show = show.set_index("category").rename(columns={
         "news_z":"News Momentum (z)",
-        "sentiment":"Sentiment (−1…+1)",
+        "sentiment":"Headline Tone (−1…+1)",
         "market_pct":"Market Move (5d %)",
         "trends":"Public Interest (Trends)"
     })
@@ -99,7 +127,6 @@ def heatmap_labeled(df: pd.DataFrame):
     fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
-
 # ---------- Headlines overview (paged + filterable) ----------
 def headlines_overview(news_df: pd.DataFrame, per_page: int = 12):
     if news_df.empty:
@@ -109,7 +136,7 @@ def headlines_overview(news_df: pd.DataFrame, per_page: int = 12):
     col1, col2 = st.columns([2,1])
     sel_cat = col1.selectbox("Filter by category", cats, index=0)
     total = len(news_df) if sel_cat == "All" else len(news_df[news_df["category"] == sel_cat])
-    page = col2.number_input("Page", min_value=1, step=1, value=1)
+    page = col2.number_input(f"Page (total {max(1, (total + per_page - 1) // per_page)})", min_value=1, step=1, value=1)
     start = (int(page) - 1) * per_page
     end = start + per_page
 
@@ -123,8 +150,7 @@ def headlines_overview(news_df: pd.DataFrame, per_page: int = 12):
             unsafe_allow_html=True
         )
 
-
-# ---------- Narratives & Tension (already present) ----------
+# ---------- Narratives & Tension (unchanged APIs) ----------
 def narratives_panel(narr_table: pd.DataFrame, top_docs: dict):
     st.subheader("Narratives & Key Themes")
     if narr_table.empty:
@@ -157,7 +183,7 @@ def tension_panel(tension_df: pd.DataFrame):
         .rename(columns={
             "tension_0_100":"Tension",
             "neg_density":"Negativity (%)",
-            "sent_vol":"Sent Volatility",
+            "sent_vol":"Tone Volatility",
             "news_z":"News z",
             "market_drawdown":"Mkt Drawdown",
             "trends_norm":"Trends (norm)",
@@ -166,34 +192,32 @@ def tension_panel(tension_df: pd.DataFrame):
         use_container_width=True
     )
 
-
 # ---------- Sentiment interpretation ----------
 def sentiment_explainer(heat_df: pd.DataFrame, news_df: pd.DataFrame):
     if heat_df.empty:
         return
-    st.subheader("How to read this sentiment")
     avg = float(heat_df["sentiment"].mean()) if "sentiment" in heat_df else 0.0
     neg_share = float((news_df["sentiment"] < -0.2).mean()) if not news_df.empty else 0.0
 
-    verdict = "balanced"
+    verdict = "Balanced"
     if avg >= 0.15 and neg_share < 0.30:
-        verdict = "constructive"
+        verdict = "Constructive"
     elif avg <= -0.15 or neg_share > 0.45:
-        verdict = "adverse"
+        verdict = "Adverse"
 
+    st.subheader("How to read this sentiment")
     st.markdown(
         f"""
-        **Current read:** *{verdict.capitalize()}*.  
-        - Average headline sentiment: **{avg:.2f}** (range −1…+1; VADER).  
-        - Share of notably negative headlines: **{neg_share*100:.1f}%** (threshold 0.2).  
+        **Current read:** *{verdict}*.  
+        - Average headline tone: **{avg:.2f}** (−1 to +1).  
+        - Share of clearly negative headlines: **{neg_share*100:.1f}%** (threshold 0.2).  
 
-        **Interpretation guide**
-        - **Constructive**: broadly supportive tone; consider leaning into momentum and testing bolder messaging.  
-        - **Balanced**: mixed tone; use proof points and credible signals; avoid polarizing claims.  
-        - **Adverse**: risk-off mood; emphasize reassurance, value, and safety—avoid risky launches without supporting evidence.
+        **Interpretation**
+        - **Constructive** — supportive tone; lean into momentum, use bolder messaging.  
+        - **Balanced** — mixed tone; emphasize credibility & proof points.  
+        - **Adverse** — risk-off mood; stress value, safety, and reassurance.
         """
     )
-
 
 # ---------- Glossary ----------
 def glossary_panel(show_full: bool = False):
@@ -203,17 +227,18 @@ def glossary_panel(show_full: bool = False):
         - **Market Move (5d %)** — Average five-day percent change across proxy tickers/ETFs per category.  
         - **News Momentum (z)** — Z-score of story count by category over the last 24–72h.  
         - **Public Interest (Trends)** — Google Trends (0–100) averaged over configured terms.  
-        - **Negativity Density** — Fraction of headlines with compound sentiment < −0.2.  
-        - **Sentiment (−1…+1)** — Mean compound sentiment of headlines (VADER on lightweight build).  
-        - **Tension Index (0–100)** — Composite of negativity, market drawdown, sentiment volatility, news volume, search interest, and entity intensity.  
-        """)
+        - **Negativity Density** — Fraction of headlines with compound score < −0.2.  
+        - **Headline Tone (−1…+1)** — Mean compound tone of headlines.  
+        - **Tension Index (0–100)** — Composite of negativity, market drawdown, tone volatility, news volume, search interest, and entity intensity.  
+        """
+    )
     if show_full:
         st.markdown(
             """
             **Method Notes**
-            - Sentiment: VADER (rule-based) with transformer upgrade path when infra allows.  
-            - News Momentum: per-category counts → standardized (z).  
-            - Trends: Google Trends interest over 7d across category keywords.  
-            - Tension: weighted blend (neg 25%, drawdown 20%, volatility 20%, news 15%, trends 10%, entities 10%).  
+            - Tone model: lexicon-based compound score (upgradeable to transformer when infra allows).  
+            - News Momentum: per-category 24–72h counts standardized (z).  
+            - Trends: Google Trends 7-day interest across category keywords.  
+            - Tension weights: Neg 25%, Drawdown 20%, Volatility 20%, News 15%, Trends 10%, Entities 10%.  
             """
         )
