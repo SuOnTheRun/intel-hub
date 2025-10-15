@@ -4,10 +4,10 @@
     "time_filter": "day",
     "subs": {
       "Technology": ["technology", "programming", "MachineLearning", "ArtificialIntelligence"],
-      "Markets & Finance": ["wallstreetbets", "stocks", "investing", "securityanalysis", "options"],
-      "Defense & Security": ["worldnews", "europe", "CombatFootage"],
+      "Markets_and_Finance": ["wallstreetbets", "stocks", "investing", "securityanalysis"],
+      "Defense_and_Security": ["worldnews", "europe", "CombatFootage"],
       "Automotive": ["cars", "electricvehicles", "teslamotors"],
-      "Luxury & Fashion": ["watches", "handbags", "malefashionadvice", "femalefashionadvice"],
+      "Luxury_and_Fashion": ["watches", "handbags", "malefashionadvice", "femalefashionadvice"],
       "Regional": ["singapore", "AskSingapore", "india", "IndiaInvestments", "europe", "UnitedKingdom", "china", "China_irl"]
     }
   },
