@@ -1,10 +1,11 @@
 import re, math, requests, feedparser, yfinance as yf
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from dateutil import parser as dtparse
 from .secrets import NEWSAPI_KEY, REDDIT, POLYGON_KEY
 from .emotions import emotion_scores
+
 
 analyzer = SentimentIntensityAnalyzer()
 
