@@ -1,4 +1,4 @@
-# app.py — Intelligence Hub (Alert Ribbon enabled)
+# app.py — Alert Ribbon safe mode (cached & toggle)
 
 import os, sys, importlib
 import streamlit as st
@@ -6,7 +6,6 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# ---------- importable ./src ----------
 HERE = os.path.dirname(__file__)
 SRC_DIR = os.path.join(HERE, "src")
 if SRC_DIR not in sys.path:
@@ -40,7 +39,7 @@ try:
     alertsmod  = _try_import("src.alerts", ("alerts",))
     ui         = _try_import("src.ui", ("ui",))
 except Exception as import_err:
-    st.error("Startup import failed — showing here to avoid a 502.")
+    st.error("Startup import failed — details below.")
     st.exception(import_err)
     st.stop()
 
@@ -70,16 +69,21 @@ def load_news_df(catalog_path: str) -> pd.DataFrame:
 def load_category_metrics() -> pd.DataFrame:
     return datasrc.category_metrics()
 
-# ---------- Sidebar & routing ----------
-st.sidebar.title("Intelligence Hub")
-page = st.sidebar.radio(
-    " ",
-    ["Command Center", "Regions", "Categories", "Markets", "Social", "My Data", "Methods"],
-    index=0,
-)
-st.sidebar.caption(f"Updated: {get_viewer_now().strftime('%d %b %Y, %H:%M %Z')}")
+@st.cache_data(ttl=5 * 60, show_spinner=False)
+def _cached_external_alerts(catalog_path: str):
+    # external (network) alerts only; data-driven are computed live
+    try:
+        return alertsmod.collect_policy_geo_cyber(catalog_path)
+    except Exception:
+        return []
 
-# ---------- Preload core data ----------
+# ---------- Sidebar ----------
+st.sidebar.title("Intelligence Hub")
+page = st.sidebar.radio(" ", ["Command Center", "Regions", "Categories", "Markets", "Social", "My Data", "Methods"], index=0)
+st.sidebar.caption(f"Updated: {get_viewer_now().strftime('%d %b %Y, %H:%M %Z')}")
+ext_alerts_on = st.sidebar.toggle("External alert feeds (policy/geo/cyber)", value=False, help="Turn on to pull regulator/geo/cyber advisories. Cached 5 minutes.")
+
+# ---------- Preload core ----------
 with st.spinner("Fetching live signals…"):
     try:
         news_df = load_news_df("src/news_rss_catalog.json")
@@ -95,12 +99,9 @@ with st.spinner("Fetching live signals…"):
         heat = pd.DataFrame(columns=["category","news_z","sentiment","market_pct","composite","news_count","trends"])
 
 if page == "Command Center":
-    ui.luxe_header(
-        title="Command Center",
-        subtitle="A live read on category momentum, tone, markets, and public interest — distilled for action."
-    )
+    ui.luxe_header("Command Center", "A live read on category momentum, tone, markets, and public interest — distilled for action.")
 
-    # HUMINT layers (silent fallbacks)
+    # HUMINT layers
     with st.spinner("Computing HUMINT layers…"):
         try:
             ent_df = entities.extract_entities(news_df, top_n=8)
@@ -112,16 +113,11 @@ if page == "Command Center":
             tension_df = pd.DataFrame(columns=["category","tension_0_100","neg_density","sent_vol","news_z","market_drawdown","trends_norm","entity_intensity"])
 
     # -------- Alert Ribbon --------
-    with st.spinner("Scanning for alerts…"):
-        alert_list = alertsmod.collect_all_alerts(
-            incident_catalog_path="src/incident_sources.json",
-            heat_df=heat, news_df=news_df, tension_df=tension_df,
-            rss_policy_geo=True,  # set False if you only want data-driven
-            limit_total=24
-        )
-    ui.alert_ribbon(alert_list, collapsed=False, max_show=18)
+    data_alerts = alertsmod.collect_data_alerts(heat, news_df, tension_df)
+    external_alerts = _cached_external_alerts("src/incident_sources.json") if ext_alerts_on else []
+    ui.alert_ribbon(data_alerts + external_alerts, collapsed=False, max_show=18)
 
-    # KPI ribbon + Highlights
+    # KPIs + Highlights
     ui.kpi_ribbon(heat_df=heat, tension_df=tension_df, news_df=news_df)
     ui.highlights_panel(heat, tension_df)
 
@@ -133,41 +129,33 @@ if page == "Command Center":
     # Heatmap
     st.subheader("Category Heatmap (24–72h)")
     ui.heatmap_labeled(heat)
-    st.caption("Interpretation: red = unusually busy news flow; blue = quieter. Tone > 0 is supportive; market % > 0 is up. Hover for values. Drag to zoom; double-click to reset.")
+    st.caption("Interpretation: red = unusually busy news flow; blue = quieter. Tone > 0 supportive; market % > 0 up. Hover for values. Drag to zoom; double-click to reset.")
 
-    # Sentiment explainer
     ui.sentiment_explainer(heat, news_df)
 
     st.markdown("---")
     st.header("HUMINT Deep-Dive")
-
-    # Narratives
-    with st.spinner("Deriving narratives…"):
-        try:
-            narr = narratives.build_narratives(news_df, top_n=3)
-        except Exception:
-            from types import SimpleNamespace
-            narr = SimpleNamespace(table=pd.DataFrame(columns=["category","narrative","weight","n_docs"]), top_docs_by_cat={})
+    try:
+        narr = narratives.build_narratives(news_df, top_n=3)
+    except Exception:
+        from types import SimpleNamespace
+        narr = SimpleNamespace(table=pd.DataFrame(columns=["category","narrative","weight","n_docs"]), top_docs_by_cat={})
     ui.narratives_panel(narr.table, narr.top_docs_by_cat)
 
-    # Entities
     st.subheader("Prominent Entities (ORG / PERSON / GPE)")
     if 'ent_df' in locals() and not ent_df.empty:
         st.dataframe(ent_df, use_container_width=True)
     else:
         st.caption("No entities extracted.")
 
-    # Tension table
     ui.tension_panel(tension_df)
 
-    # Headlines
     st.markdown("---")
     st.header("Top Headlines by Category")
     ui.headlines_overview(news_df)
 
-    # Glossary
     st.markdown("---")
-    ui.glossary_panel()
+    ui.glossary_panel(show_full=False)
 
 elif page == "Categories":
     ui.luxe_header("Categories", "Drilldowns by industry vertical.")
