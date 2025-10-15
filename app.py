@@ -1,51 +1,56 @@
-# app.py — Intelligence Hub (routing + upgraded Command Center)
+# app.py — ultra-defensive loader to prevent 502s on Render
 
-import os, sys
+import os, sys, importlib
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# Make ./src importable even if package path differs on host
-SRC_DIR = os.path.join(os.path.dirname(__file__), "src")
+# --- ensure ./src is importable (works even if package init is missing)
+HERE = os.path.dirname(__file__)
+SRC_DIR = os.path.join(HERE, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# Viewer timezone (browser)
+# --- optional browser timezone
 try:
     from streamlit_javascript import st_javascript
 except Exception:
     st_javascript = None
 
-# Imports (package → fallback-to-module)
-try:
-    from src.collectors import get_news_dataframe
-    from src.emotions import add_sentiment
-    from src.data_sources import category_metrics
-    from src.analytics import build_category_heatmap, headline_blocks
-    from src.narratives import build_narratives
-    from src.entities import extract_entities
-    from src.risk_model import compute_tension
-    from src.ui import (
-        luxe_header, kpi_ribbon, heatmap_labeled, headlines_overview,
-        narratives_panel, tension_panel, sentiment_explainer, glossary_panel
-    )
-except Exception:
-    from collectors import get_news_dataframe
-    from emotions import add_sentiment
-    from data_sources import category_metrics
-    from analytics import build_category_heatmap, headline_blocks
-    from narratives import build_narratives
-    from entities import extract_entities
-    from risk_model import compute_tension
-    from ui import (
-        luxe_header, kpi_ribbon, heatmap_labeled, headlines_overview,
-        narratives_panel, tension_panel, sentiment_explainer, glossary_panel
-    )
-
-# ---------- Page config ----------
 st.set_page_config(page_title="Intelligence Hub", layout="wide", initial_sidebar_state="expanded")
 
+# ============ robust dynamic imports ============
+def _try_import(module_name, alt_names=()):
+    """
+    Try `module_name`, else each name in alt_names; returns the module or raises the last error.
+    """
+    last_err = None
+    for name in (module_name, *alt_names):
+        try:
+            return importlib.import_module(name)
+        except Exception as e:
+            last_err = e
+    if last_err:
+        raise last_err
+
+try:
+    # prefer package-style (src.*), fall back to flat (module in ./src)
+    collectors = _try_import("src.collectors", ("collectors",))
+    emotions   = _try_import("src.emotions", ("emotions",))
+    datasrc    = _try_import("src.data_sources", ("data_sources",))
+    analytics  = _try_import("src.analytics", ("analytics",))
+    narratives = _try_import("src.narratives", ("narratives",))
+    entities   = _try_import("src.entities", ("entities",))
+    riskmodel  = _try_import("src.risk_model", ("risk_model",))
+    ui         = _try_import("src.ui", ("ui",))
+except Exception as import_err:
+    # Render the import error in the page (prevents 502)
+    st.error("Startup import failed. See details below.")
+    st.exception(import_err)
+    st.stop()
+
+# ============ utilities ============
 def get_viewer_now():
     tz_fallback = "Asia/Kolkata"
     tz_name = None
@@ -64,96 +69,113 @@ def get_viewer_now():
 
 @st.cache_data(ttl=15 * 60, show_spinner=False)
 def load_news_df(catalog_path: str) -> pd.DataFrame:
-    df = get_news_dataframe(catalog_path)
-    df = add_sentiment(df)
+    df = collectors.get_news_dataframe(catalog_path)
+    df = emotions.add_sentiment(df)  # VADER on lightweight build
     return df
 
 @st.cache_data(ttl=10 * 60, show_spinner=False)
 def load_category_metrics() -> pd.DataFrame:
-    return category_metrics()
+    return datasrc.category_metrics()
 
-# ---------- Sidebar & routing ----------
+# ============ sidebar + routing ============
 st.sidebar.title("Intelligence Hub")
 page = st.sidebar.radio(
     " ",
     ["Command Center", "Regions", "Categories", "Markets", "Social", "My Data", "Methods"],
-    index=0
+    index=0,
 )
 st.sidebar.caption(f"Updated: {get_viewer_now().strftime('%d %b %Y, %H:%M %Z')}")
 
-# Preload data once (used by multiple pages)
+# ============ preload core data ============
 with st.spinner("Fetching live signals…"):
     try:
         news_df = load_news_df("src/news_rss_catalog.json")
     except Exception as e:
-        st.error(f"News feed error: {e}")
+        st.error("News feed error.")
+        st.exception(e)
         news_df = pd.DataFrame(columns=["category","title","link","published","summary","source","published_dt","sentiment"])
-
     try:
         base = load_category_metrics()
     except Exception as e:
-        st.error(f"Signals error: {e}")
+        st.error("Signals error.")
+        st.exception(e)
         base = pd.DataFrame(columns=["category","trends","market_pct"])
-
     try:
-        heat = build_category_heatmap(news_df, base)
+        heat = analytics.build_category_heatmap(news_df, base)
     except Exception as e:
-        st.error(f"Analytics error: {e}")
+        st.error("Analytics error.")
+        st.exception(e)
         heat = pd.DataFrame(columns=["category","news_z","sentiment","market_pct","composite","news_count","trends"])
 
-# ---------- ROUTES ----------
+# ============ pages ============
 if page == "Command Center":
-    # Polished header
-    luxe_header(
+    ui.luxe_header(
         title="Command Center",
         subtitle="A live situational read on markets, narratives, and public interest, distilled for decision-making."
     )
 
-    # KPIs (now intuitive & comprehensive) + glossary tooltip
-    # Merge Tension for ribbon
+    # HUMINT layers needed for KPIs and tables
     with st.spinner("Computing HUMINT layers…"):
-        ent_df = extract_entities(news_df, top_n=8)
-        tension_df = compute_tension(news_df, heat, ent_df)
+        try:
+            ent_df = entities.extract_entities(news_df, top_n=8)
+        except Exception as e:
+            st.warning("Entity extraction degraded (fallback).")
+            st.exception(e)
+            ent_df = pd.DataFrame(columns=["category","label","entity","count"])
 
-    kpi_ribbon(heat_df=heat, tension_df=tension_df)
+        try:
+            tension_df = riskmodel.compute_tension(news_df, heat, ent_df)
+        except Exception as e:
+            st.warning("Tension model degraded (fallback).")
+            st.exception(e)
+            tension_df = pd.DataFrame(columns=["category","tension_0_100","neg_density","sent_vol","news_z","market_drawdown","trends_norm","entity_intensity"])
 
-    # Labeled heatmap with micro-instructions
+    # KPI ribbon
+    ui.kpi_ribbon(heat_df=heat, tension_df=tension_df)
+
+    # Heatmap
     st.subheader("Category Heatmap (24–72h)")
-    heatmap_labeled(heat)
+    ui.heatmap_labeled(heat)
     st.caption("Note: Hover to inspect values. Drag to zoom; double-click to reset view.")
 
-    # Sentiment interpretation (plain English)
-    sentiment_explainer(heat, news_df)
+    # Sentiment explainer
+    ui.sentiment_explainer(heat, news_df)
 
     st.markdown("---")
-
-    # Narratives & Entities
     st.header("HUMINT Deep-Dive")
+
+    # Narratives
     with st.spinner("Deriving narratives…"):
-        narr = build_narratives(news_df, top_n=3)
-    narratives_panel(narr.table, narr.top_docs_by_cat)
+        try:
+            narr = narratives.build_narratives(news_df, top_n=3)
+        except Exception as e:
+            st.warning("Narratives degraded (fallback).")
+            st.exception(e)
+            from types import SimpleNamespace
+            narr = SimpleNamespace(table=pd.DataFrame(columns=["category","narrative","weight","n_docs"]), top_docs_by_cat={})
+    ui.narratives_panel(narr.table, narr.top_docs_by_cat)
 
+    # Entities table
     st.subheader("Prominent Entities (ORG / PERSON / GPE)")
-    if ent_df.empty:
-        st.caption("No entities extracted.")
-    else:
+    if 'ent_df' in locals() and not ent_df.empty:
         st.dataframe(ent_df, use_container_width=True)
+    else:
+        st.caption("No entities extracted.")
 
-    # Tension Index table
-    tension_panel(tension_df)
+    # Tension Index
+    ui.tension_panel(tension_df)
 
-    # Headlines — now *overviewed* and paged/filterable
+    # Headlines
     st.markdown("---")
     st.header("Top Headlines by Category")
-    headlines_overview(news_df)
+    ui.headlines_overview(news_df)
 
-    # At the bottom: quick glossary
+    # Glossary
     st.markdown("---")
-    glossary_panel()
+    ui.glossary_panel()
 
 elif page == "Categories":
-    luxe_header("Categories", "Drilldowns by industry vertical.")
-    # Quick selector and table
+    ui.luxe_header("Categories", "Drilldowns by industry vertical.")
     cats = sorted(heat["category"].unique().tolist()) if not heat.empty else []
     sel = st.selectbox("Choose a category", cats) if cats else None
     if sel:
@@ -164,21 +186,21 @@ elif page == "Categories":
         st.info("No categories available yet.")
 
 elif page == "Markets":
-    luxe_header("Markets", "Five-day % change by mapped proxies; use Command Center for context.")
+    ui.luxe_header("Markets", "Five-day % change by mapped proxies; use Command Center for context.")
     st.dataframe(heat[["category","market_pct","news_count","trends","sentiment","composite"]], use_container_width=True)
 
 elif page == "Regions":
-    luxe_header("Regions", "Regional view coming next: geospatial layers & movement tracking (Milestone 2).")
+    ui.luxe_header("Regions", "Regional view coming next: geospatial layers & movement tracking (Milestone 2).")
     st.info("Regional OSINT/HUMINT and mobility layers will land in Milestone 2.")
 
 elif page == "Social":
-    luxe_header("Social", "Community pulse via Reddit and trend signals (Milestone 2).")
+    ui.luxe_header("Social", "Community pulse via Reddit and trend signals (Milestone 2).")
     st.info("Reddit HUMINT and topic velocity will land in Milestone 2.")
 
 elif page == "My Data":
-    luxe_header("My Data", "Bring your own sheets/logs for private overlays.")
+    ui.luxe_header("My Data", "Bring your own sheets/logs for private overlays.")
     st.info("Uploads & overlays to be enabled after snapshots module (Milestone 3–4).")
 
 elif page == "Methods":
-    luxe_header("Methods", "How metrics are computed.")
-    glossary_panel(show_full=True)
+    ui.luxe_header("Methods", "How metrics are computed.")
+    ui.glossary_panel(show_full=True)
