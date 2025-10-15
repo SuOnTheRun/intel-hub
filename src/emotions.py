@@ -1,59 +1,43 @@
-# src/emotions.py
+# src/emotions.py — headline sentiment without NLTK downloads
+from __future__ import annotations
 import pandas as pd
 
-# --- VADER fallback
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
 try:
-    nltk.data.find("sentiment/vader_lexicon.zip")
-except LookupError:
-    nltk.download("vader_lexicon")
-_vader = SentimentIntensityAnalyzer()
-
-# --- Transformer (preferred, auto-fallback)
-_TRANSFORMER_READY = False
-try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-    import torch
-    _MODEL_NAME = "cardiffnlp/twitter-roberta-base-sentiment-latest"
-    _tok = AutoTokenizer.from_pretrained(_MODEL_NAME, local_files_only=False)
-    _mdl = AutoModelForSequenceClassification.from_pretrained(_MODEL_NAME, local_files_only=False)
-    _mdl.eval()
-    _TRANSFORMER_READY = True
+    # No external downloads required; fast and lightweight
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 except Exception:
-    _TRANSFORMER_READY = False
+    SentimentIntensityAnalyzer = None
 
-def _sent_transformer(batch_text: list[str]) -> list[float]:
-    scores = []
-    with torch.no_grad():
-        for t in batch_text:
-            enc = _tok(t[:512], return_tensors="pt", truncation=True)
-            out = _mdl(**enc)
-            logits = out.logits[0].detach().cpu().numpy()
-            # model labels: ['negative','neutral','positive'] -> compound in [-1,1]
-            # softmax -> weighted mapping
-            exps = (logits - logits.max()).astype(float)
-            exps = (exps ** 1.0)
-            probs = (exps / exps.sum())
-            compound = probs[2] - probs[0]
-            scores.append(float(compound))
-    return scores
+_analyzer = None
 
-def _sent_vader(batch_text: list[str]) -> list[float]:
-    return [_vader.polarity_scores(t).get("compound", 0.0) for t in batch_text]
+def _get_analyzer():
+    global _analyzer
+    if _analyzer is None and SentimentIntensityAnalyzer is not None:
+        _analyzer = SentimentIntensityAnalyzer()
+    return _analyzer
 
-def add_sentiment(df: pd.DataFrame, col: str = "title") -> pd.DataFrame:
-    if df.empty:
-        df["sentiment"] = []
-        return df
-    texts = df[col].fillna("").astype(str).tolist()
+def _score_text(txt: str) -> float:
+    a = _get_analyzer()
+    if not a or not isinstance(txt, str) or not txt.strip():
+        return 0.0
     try:
-        if _TRANSFORMER_READY:
-            scores = _sent_transformer(texts)
-        else:
-            scores = _sent_vader(texts)
+        return float(a.polarity_scores(txt)["compound"])
     except Exception:
-        scores = _sent_vader(texts)
-    out = df.copy()
-    out["sentiment"] = scores
-    return out
+        return 0.0
+
+def add_sentiment(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds 'sentiment' column in [-1,+1] using VADER (vaderSentiment package).
+    Works on title + summary if both exist.
+    """
+    if df is None or df.empty:
+        return df if df is not None else pd.DataFrame()
+
+    def _row_text(r):
+        title = str(r.get("title", "") or "")
+        summ  = str(r.get("summary", "") or "")
+        return (title + ". " + summ).strip()
+
+    df = df.copy()
+    df["sentiment"] = [_score_text(_row_text(r)) for _, r in df.iterrows()]
+    return df
