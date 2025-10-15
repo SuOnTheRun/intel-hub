@@ -1,4 +1,4 @@
-# app.py — Intelligence Hub (robust loader + Executive Summary)
+# app.py — Intelligence Hub (Alert Ribbon enabled)
 
 import os, sys, importlib
 import streamlit as st
@@ -6,13 +6,12 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# ---------- Make ./src importable even if package path differs ----------
+# ---------- importable ./src ----------
 HERE = os.path.dirname(__file__)
 SRC_DIR = os.path.join(HERE, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# ---------- Optional browser timezone ----------
 try:
     from streamlit_javascript import st_javascript
 except Exception:
@@ -20,9 +19,6 @@ except Exception:
 
 st.set_page_config(page_title="Intelligence Hub", layout="wide", initial_sidebar_state="expanded")
 
-# ======================================================================
-# Dynamic imports (prevents 502s if src/ package path differs on host)
-# ======================================================================
 def _try_import(module_name, alt_names=()):
     last_err = None
     for name in (module_name, *alt_names):
@@ -41,17 +37,14 @@ try:
     narratives = _try_import("src.narratives", ("narratives",))
     entities   = _try_import("src.entities", ("entities",))
     riskmodel  = _try_import("src.risk_model", ("risk_model",))
+    alertsmod  = _try_import("src.alerts", ("alerts",))
     ui         = _try_import("src.ui", ("ui",))
 except Exception as import_err:
-    st.error("Startup import failed. Details below (shown here to avoid a 502).")
+    st.error("Startup import failed — showing here to avoid a 502.")
     st.exception(import_err)
     st.stop()
 
-# ======================================================================
-# Utilities
-# ======================================================================
 def get_viewer_now():
-    """Return current datetime in viewer's local timezone via browser Intl API (fallback: Asia/Kolkata)."""
     tz_fallback = "Asia/Kolkata"
     tz_name = None
     if st_javascript is not None:
@@ -70,16 +63,14 @@ def get_viewer_now():
 @st.cache_data(ttl=15 * 60, show_spinner=False)
 def load_news_df(catalog_path: str) -> pd.DataFrame:
     df = collectors.get_news_dataframe(catalog_path)
-    df = emotions.add_sentiment(df)  # lightweight build uses lexicon-based tone
+    df = emotions.add_sentiment(df)
     return df
 
 @st.cache_data(ttl=10 * 60, show_spinner=False)
 def load_category_metrics() -> pd.DataFrame:
     return datasrc.category_metrics()
 
-# ======================================================================
-# Sidebar & routing
-# ======================================================================
+# ---------- Sidebar & routing ----------
 st.sidebar.title("Intelligence Hub")
 page = st.sidebar.radio(
     " ",
@@ -88,28 +79,21 @@ page = st.sidebar.radio(
 )
 st.sidebar.caption(f"Updated: {get_viewer_now().strftime('%d %b %Y, %H:%M %Z')}")
 
-# ======================================================================
-# Preload core data (shared across pages)
-# ======================================================================
+# ---------- Preload core data ----------
 with st.spinner("Fetching live signals…"):
     try:
         news_df = load_news_df("src/news_rss_catalog.json")
     except Exception:
         news_df = pd.DataFrame(columns=["category","title","link","published","summary","source","published_dt","sentiment"])
-
     try:
         base = load_category_metrics()
     except Exception:
         base = pd.DataFrame(columns=["category","trends","market_pct"])
-
     try:
         heat = analytics.build_category_heatmap(news_df, base)
     except Exception:
         heat = pd.DataFrame(columns=["category","news_z","sentiment","market_pct","composite","news_count","trends"])
 
-# ======================================================================
-# Routes
-# ======================================================================
 if page == "Command Center":
     ui.luxe_header(
         title="Command Center",
@@ -127,11 +111,21 @@ if page == "Command Center":
         except Exception:
             tension_df = pd.DataFrame(columns=["category","tension_0_100","neg_density","sent_vol","news_z","market_drawdown","trends_norm","entity_intensity"])
 
+    # -------- Alert Ribbon --------
+    with st.spinner("Scanning for alerts…"):
+        alert_list = alertsmod.collect_all_alerts(
+            incident_catalog_path="src/incident_sources.json",
+            heat_df=heat, news_df=news_df, tension_df=tension_df,
+            rss_policy_geo=True,  # set False if you only want data-driven
+            limit_total=24
+        )
+    ui.alert_ribbon(alert_list, collapsed=False, max_show=18)
+
     # KPI ribbon + Highlights
     ui.kpi_ribbon(heat_df=heat, tension_df=tension_df, news_df=news_df)
     ui.highlights_panel(heat, tension_df)
 
-    # Executive Summary (new)
+    # Executive Summary
     st.markdown("---")
     st.header("Executive Summary")
     ui.insights_summary(heat_df=heat, news_df=news_df, tension_df=tension_df, max_items=8)
