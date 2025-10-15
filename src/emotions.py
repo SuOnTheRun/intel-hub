@@ -1,29 +1,22 @@
-import re, pandas as pd
-from functools import lru_cache
-from pathlib import Path
+import pandas as pd
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
 
-LEX_URL = "https://raw.githubusercontent.com/words/nrc-emotion-lexicon/master/json/nrc-emotion-lexicon.json"
+# Ensure lexicon exists on first run (works on Render/Streamlit Cloud)
+try:
+    nltk.data.find("sentiment/vader_lexicon.zip")
+except LookupError:
+    nltk.download("vader_lexicon")
 
-@lru_cache(maxsize=1)
-def load_lexicon() -> dict:
-    p = Path(".cache_nrc.json")
-    if p.exists(): return pd.read_json(p).to_dict()
-    import requests
-    r = requests.get(LEX_URL, timeout=20)
-    r.raise_for_status()
-    data = r.json()
-    pd.Series(data).to_json(p)
-    return data
+_sia = SentimentIntensityAnalyzer()
 
-def emotion_scores(text: str) -> dict:
-    if not text:
-        return {e:0 for e in ("anger","anticipation","disgust","fear","joy","sadness","surprise","trust")}
-    lex = load_lexicon()
-    toks = re.findall(r"[A-Za-z']+", text.lower())
-    scores = {e:0 for e in ("anger","anticipation","disgust","fear","joy","sadness","surprise","trust")}
-    for t in toks:
-        if t in lex:
-            for e,flag in lex[t].items():
-                if flag: scores[e] += 1
-    total = sum(scores.values()) or 1
-    return {k: round(v/total,4) for k,v in scores.items()}
+def score_sentiment(texts: list[str]) -> list[float]:
+    return [_sia.polarity_scores(t).get("compound", 0.0) for t in texts]
+
+def add_sentiment(df: pd.DataFrame, col: str = "title") -> pd.DataFrame:
+    if df.empty:
+        df["sentiment"] = []
+        return df
+    df = df.copy()
+    df["sentiment"] = score_sentiment(df[col].astype(str).tolist())
+    return df
