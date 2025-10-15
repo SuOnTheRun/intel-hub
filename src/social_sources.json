@@ -1,0 +1,18 @@
+{
+  "reddit": {
+    "score_threshold": 500,
+    "time_filter": "day",
+    "subs": {
+      "Technology": ["technology", "programming", "MachineLearning", "ArtificialIntelligence"],
+      "Markets & Finance": ["wallstreetbets", "stocks", "investing", "securityanalysis", "options"],
+      "Defense & Security": ["worldnews", "europe", "CombatFootage"],
+      "Automotive": ["cars", "electricvehicles", "teslamotors"],
+      "Luxury & Fashion": ["watches", "handbags", "malefashionadvice", "femalefashionadvice"],
+      "Regional": ["singapore", "AskSingapore", "india", "IndiaInvestments", "europe", "UnitedKingdom", "china", "China_irl"]
+    }
+  },
+  "hackernews": {
+    "top": true,
+    "max_items": 60
+  }
+}
