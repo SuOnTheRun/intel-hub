@@ -1,15 +1,13 @@
-import os, pandas as pd, re
+import re, pandas as pd
 from functools import lru_cache
 from pathlib import Path
 
-LEX_URL = "https://raw.githubusercontent.com/words/nrc-emotion-lexicon/master/json/nrc-emotion-lexicon.json"  # open source
+LEX_URL = "https://raw.githubusercontent.com/words/nrc-emotion-lexicon/master/json/nrc-emotion-lexicon.json"
 
 @lru_cache(maxsize=1)
 def load_lexicon() -> dict:
-    # lazy fetch; cached on disk so we don't re-download
     p = Path(".cache_nrc.json")
-    if p.exists():
-        return pd.read_json(p).to_dict()
+    if p.exists(): return pd.read_json(p).to_dict()
     import requests
     r = requests.get(LEX_URL, timeout=20)
     r.raise_for_status()
@@ -18,7 +16,7 @@ def load_lexicon() -> dict:
     return data
 
 def emotion_scores(text: str) -> dict:
-    if not text: 
+    if not text:
         return {e:0 for e in ("anger","anticipation","disgust","fear","joy","sadness","surprise","trust")}
     lex = load_lexicon()
     toks = re.findall(r"[A-Za-z']+", text.lower())
