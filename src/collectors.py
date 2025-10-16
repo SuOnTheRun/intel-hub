@@ -1,4 +1,5 @@
-# src/collectors.py — coverage-first, capped, cached, UTC-safe
+# src/collectors.py — coverage-first, capped, cached, UTC-safe (fixed .str.strip)
+
 from __future__ import annotations
 import os, json, time, random, urllib.request
 from typing import Dict, List, Tuple
@@ -13,9 +14,9 @@ except Exception:
 import xml.etree.ElementTree as ET
 
 # ---- Tunables for Render free-tier ----
-MAX_TOTAL_FEEDS         = 64   # total external feeds per refresh (raised a bit but still safe)
-MANDATORY_PER_CATEGORY  = 2    # always include first N feeds for every category (if present)
-OPTIONAL_PER_CATEGORY   = 2    # then rotate up to this many more, per category
+MAX_TOTAL_FEEDS         = 64   # total external feeds per refresh
+MANDATORY_PER_CATEGORY  = 2    # always include first N feeds for every category
+OPTIONAL_PER_CATEGORY   = 2    # then rotate up to this many more per category
 MAX_ITEMS_PER_FEED      = 60
 PER_REQUEST_TIMEOUT     = 5
 DISK_CACHE_TTL_SEC      = 600  # 10 minutes
@@ -97,7 +98,6 @@ def _fetch_feed(url: str, max_items: int = MAX_ITEMS_PER_FEED, timeout: int = PE
                 title = getattr(e, "title", "") or ""
                 link  = getattr(e, "link", "") or ""
                 desc  = getattr(e, "summary", "") or getattr(e, "description", "") or ""
-                # published
                 if getattr(e, "published", None):
                     published = _to_utc(getattr(e, "published"))
                 elif getattr(e, "updated", None):
@@ -135,10 +135,8 @@ def _plan_feeds(catalog: Dict[str, List[str]]) -> List[Tuple[str, str]]:
 
     for cat, urls in catalog.items():
         urls = list(urls)
-        # Always include the first N as "mandatory"
         for u in urls[:MANDATORY_PER_CATEGORY]:
             mandatory.append((cat, u))
-        # Take rotated optional URLs next
         rest = urls[MANDATORY_PER_CATEGORY:]
         random.shuffle(rest)
         for u in rest[:OPTIONAL_PER_CATEGORY]:
@@ -146,7 +144,6 @@ def _plan_feeds(catalog: Dict[str, List[str]]) -> List[Tuple[str, str]]:
 
     random.shuffle(mandatory)
     random.shuffle(optional)
-
     plan = mandatory + optional
     return plan[:MAX_TOTAL_FEEDS]
 
@@ -187,11 +184,23 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
         stale = _cache_read()
         return stale if stale is not None else df
 
-    df["title"] = df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.trim()
-    df["summary"] = df["summary"].fillna("").astype(str)
-    df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(
-        pd.Timestamp.utcnow().tz_localize("UTC")
-    )
+    # ---- CLEANING (fixed) ----
+    try:
+        df["title"] = (
+            df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+        )
+        df["summary"] = df["summary"].fillna("").astype(str)
+    except Exception:
+        # Never let a cleaning error nuke the snapshot
+        pass
+
+    try:
+        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(
+            pd.Timestamp.utcnow().tz_localize("UTC")
+        )
+    except Exception:
+        df["published_dt"] = pd.Timestamp.utcnow().tz_localize("UTC")
+
     df = df.sort_values("published_dt", ascending=False).reset_index(drop=True)
 
     _cache_write(df)
