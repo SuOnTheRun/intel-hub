@@ -1,189 +1,64 @@
-# app.py — Alert Ribbon safe mode (cached & toggle)
-
-import os, sys, importlib
-import streamlit as st
+# src/analytics.py — cross-sectional momentum + composite
+from __future__ import annotations
 import pandas as pd
-from datetime import datetime
-from zoneinfo import ZoneInfo
+import numpy as np
 
-HERE = os.path.dirname(__file__)
-SRC_DIR = os.path.join(HERE, "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+def _robust_z(counts: pd.Series) -> pd.Series:
+    """
+    Cross-sectional z using robust MAD. Works even on a single snapshot.
+    """
+    x = counts.astype(float)
+    med = x.median()
+    mad = (x - med).abs().median()
+    if mad == 0:
+        # fallback to std if MAD collapses
+        std = x.std(ddof=0)
+        return (x - x.mean()) / (std if std > 1e-9 else 1.0)
+    return 0.6745 * (x - med) / (mad if mad > 1e-9 else 1.0)
 
-try:
-    from streamlit_javascript import st_javascript
-except Exception:
-    st_javascript = None
-
-st.set_page_config(page_title="Intelligence Hub", layout="wide", initial_sidebar_state="expanded")
-
-def _try_import(module_name, alt_names=()):
-    last_err = None
-    for name in (module_name, *alt_names):
-        try:
-            return importlib.import_module(name)
-        except Exception as e:
-            last_err = e
-    if last_err:
-        raise last_err
-
-try:
-    collectors = _try_import("src.collectors", ("collectors",))
-    emotions   = _try_import("src.emotions", ("emotions",))
-    datasrc    = _try_import("src.data_sources", ("data_sources",))
-    analytics  = _try_import("src.analytics", ("analytics",))
-    narratives = _try_import("src.narratives", ("narratives",))
-    entities   = _try_import("src.entities", ("entities",))
-    riskmodel  = _try_import("src.risk_model", ("risk_model",))
-    alertsmod  = _try_import("src.alerts", ("alerts",))
-    ui         = _try_import("src.ui", ("ui",))
-except Exception as import_err:
-    st.error("Startup import failed — details below.")
-    st.exception(import_err)
-    st.stop()
-
-def get_viewer_now():
-    tz_fallback = "Asia/Kolkata"
-    tz_name = None
-    if st_javascript is not None:
-        try:
-            tz_name = st_javascript("Intl.DateTimeFormat().resolvedOptions().timeZone")
-        except Exception:
-            tz_name = None
-    if not tz_name:
-        tz_name = tz_fallback
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo(tz_fallback)
-    return datetime.now(tz)
-
-@st.cache_data(ttl=15 * 60, show_spinner=False)
-def load_news_df(catalog_path: str) -> pd.DataFrame:
-    df = collectors.get_news_dataframe(catalog_path)
-    df = emotions.add_sentiment(df)
-    return df
-
-@st.cache_data(ttl=10 * 60, show_spinner=False)
-def load_category_metrics() -> pd.DataFrame:
-    return datasrc.category_metrics()
-
-@st.cache_data(ttl=5 * 60, show_spinner=False)
-def _cached_external_alerts(catalog_path: str):
-    # external (network) alerts only; data-driven are computed live
-    try:
-        return alertsmod.collect_policy_geo_cyber(catalog_path)
-    except Exception:
-        return []
-
-# ---------- Sidebar ----------
-st.sidebar.title("Intelligence Hub")
-page = st.sidebar.radio(" ", ["Command Center", "Regions", "Categories", "Markets", "Social", "My Data", "Methods"], index=0)
-st.sidebar.caption(f"Updated: {get_viewer_now().strftime('%d %b %Y, %H:%M %Z')}")
-ext_alerts_on = st.sidebar.toggle("External alert feeds (policy/geo/cyber)", value=False, help="Turn on to pull regulator/geo/cyber advisories. Cached 5 minutes.")
-
-# ---------- Preload core ----------
-with st.spinner("Fetching live signals…"):
-    try:
-        news_df = load_news_df("src/news_rss_catalog.json")
-    except Exception:
-        news_df = pd.DataFrame(columns=["category","title","link","published","summary","source","published_dt","sentiment"])
-    try:
-        base = load_category_metrics()
-    except Exception:
-        base = pd.DataFrame(columns=["category","trends","market_pct"])
-    try:
-        heat = analytics.build_category_heatmap(news_df, base)
-    except Exception:
-        heat = pd.DataFrame(columns=["category","news_z","sentiment","market_pct","composite","news_count","trends"])
-
-if page == "Command Center":
-    ui.luxe_header("Command Center", "A live read on category momentum, tone, markets, and public interest — distilled for action.")
-
-    # HUMINT layers
-    with st.spinner("Computing HUMINT layers…"):
-        try:
-            ent_df = entities.extract_entities(news_df, top_n=8)
-        except Exception:
-            ent_df = pd.DataFrame(columns=["category","label","entity","count"])
-        try:
-            tension_df = riskmodel.compute_tension(news_df, heat, ent_df)
-        except Exception:
-            tension_df = pd.DataFrame(columns=["category","tension_0_100","neg_density","sent_vol","news_z","market_drawdown","trends_norm","entity_intensity"])
-
-    # -------- Alert Ribbon --------
-    data_alerts = alertsmod.collect_data_alerts(heat, news_df, tension_df)
-    external_alerts = _cached_external_alerts("src/incident_sources.json") if ext_alerts_on else []
-    ui.alert_ribbon(data_alerts + external_alerts, collapsed=False, max_show=18)
-
-    # KPIs + Highlights
-    ui.kpi_ribbon(heat_df=heat, tension_df=tension_df, news_df=news_df)
-    ui.highlights_panel(heat, tension_df)
-
-    # Executive Summary
-    st.markdown("---")
-    st.header("Executive Summary")
-    ui.insights_summary(heat_df=heat, news_df=news_df, tension_df=tension_df, max_items=8)
-
-    # Heatmap
-    st.subheader("Category Heatmap (24–72h)")
-    ui.heatmap_labeled(heat)
-    st.caption("Interpretation: red = unusually busy news flow; blue = quieter. Tone > 0 supportive; market % > 0 up. Hover for values. Drag to zoom; double-click to reset.")
-
-    ui.sentiment_explainer(heat, news_df)
-
-    st.markdown("---")
-    st.header("HUMINT Deep-Dive")
-    try:
-        narr = narratives.build_narratives(news_df, top_n=3)
-    except Exception:
-        from types import SimpleNamespace
-        narr = SimpleNamespace(table=pd.DataFrame(columns=["category","narrative","weight","n_docs"]), top_docs_by_cat={})
-    ui.narratives_panel(narr.table, narr.top_docs_by_cat)
-
-    st.subheader("Prominent Entities (ORG / PERSON / GPE)")
-    if 'ent_df' in locals() and not ent_df.empty:
-        st.dataframe(ent_df, use_container_width=True)
+def build_category_heatmap(news_df: pd.DataFrame, base_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns one row per category with:
+      category, news_count, news_z, sentiment, market_pct, trends, composite
+    Works even if some categories have few/zero items.
+    """
+    # counts & tone
+    if news_df is None or news_df.empty:
+        core = pd.DataFrame(columns=["category","news_count","sentiment"])
     else:
-        st.caption("No entities extracted.")
+        g = news_df.groupby("category", dropna=True)
+        core = pd.DataFrame({
+            "news_count": g.size(),
+            "sentiment": g["sentiment"].mean()
+        }).reset_index()
 
-    ui.tension_panel(tension_df)
+    # base metrics (trends, market) may be empty — make safe defaults
+    if base_df is None or base_df.empty:
+        base_df = pd.DataFrame(columns=["category","trends","market_pct"])
+    if "trends" not in base_df: base_df["trends"] = np.nan
+    if "market_pct" not in base_df: base_df["market_pct"] = 0.0
 
-    st.markdown("---")
-    st.header("Top Headlines by Category")
-    ui.headlines_overview(news_df)
+    # union of categories from both sources
+    cats = pd.DataFrame({"category": pd.unique(pd.concat([core["category"], base_df["category"]], ignore_index=True).dropna())})
 
-    st.markdown("---")
-    ui.glossary_panel(show_full=False)
+    out = cats.merge(core, on="category", how="left").merge(base_df[["category","trends","market_pct"]], on="category", how="left")
+    out["news_count"] = out["news_count"].fillna(0).astype(int)
+    out["sentiment"]  = out["sentiment"].fillna(0.0).astype(float)
+    out["trends"]     = out["trends"].fillna(0.0).astype(float)
+    out["market_pct"] = out["market_pct"].fillna(0.0).astype(float)
 
-elif page == "Categories":
-    ui.luxe_header("Categories", "Drilldowns by industry vertical.")
-    cats = sorted(heat["category"].unique().tolist()) if not heat.empty else []
-    sel = st.selectbox("Choose a category", cats) if cats else None
-    if sel:
-        sub = news_df[news_df["category"] == sel].sort_values("published_dt", ascending=False)
-        st.write(f"Latest in **{sel}**")
-        st.dataframe(sub[["published_dt","source","title","link","sentiment"]].head(200), use_container_width=True)
-    else:
-        st.info("No categories available yet.")
+    # cross-sectional momentum from current snapshot
+    out["news_z"] = _robust_z(out["news_count"])
 
-elif page == "Markets":
-    ui.luxe_header("Markets", "Five-day % change by mapped proxies; use Command Center for context.")
-    st.dataframe(heat[["category","market_pct","news_count","trends","sentiment","composite"]], use_container_width=True)
+    # simple composite (you already show details elsewhere)
+    # weights: momentum 35%, tone 25%, market 20%, interest 20%
+    out["composite"] = (
+        0.35 * out["news_z"].clip(-3, 3) +
+        0.25 * out["sentiment"].clip(-1, 1) +
+        0.20 * (out["market_pct"] / 3.0).clip(-3, 3) +  # scale market %
+        0.20 * (out["trends"] / 50.0 - 1.0).clip(-3, 3) # center 50 as baseline
+    )
 
-elif page == "Regions":
-    ui.luxe_header("Regions", "Regional view coming next: geospatial layers & movement tracking (Milestone 2).")
-    st.info("Regional OSINT/HUMINT and mobility layers will land in Milestone 2.")
-
-elif page == "Social":
-    ui.luxe_header("Social", "Community pulse via Reddit and trend signals (Milestone 2).")
-    st.info("Reddit HUMINT and topic velocity will land in Milestone 2.")
-
-elif page == "My Data":
-    ui.luxe_header("My Data", "Bring your own sheets/logs for private overlays.")
-    st.info("Uploads & overlays to be enabled after snapshots module (Milestone 3–4).")
-
-elif page == "Methods":
-    ui.luxe_header("Methods", "How metrics are computed.")
-    ui.glossary_panel(show_full=True)
+    # tidy
+    out = out.sort_values("composite", ascending=False).reset_index(drop=True)
+    return out
