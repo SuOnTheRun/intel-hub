@@ -1,7 +1,7 @@
-# src/collectors.py — capped, cached feed collection with UTC-safe dates
+# src/collectors.py — coverage-first, capped, cached, UTC-safe
 from __future__ import annotations
 import os, json, time, random, urllib.request
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from urllib.parse import urlparse
 import pandas as pd
 
@@ -12,18 +12,19 @@ except Exception:
     feedparser = None
 import xml.etree.ElementTree as ET
 
-# ---- Tunables (keep Render free-tier happy) ----
-MAX_TOTAL_FEEDS       = 40   # hard cap across ALL categories per refresh
-MAX_FEEDS_PER_CATEGORY= 4    # cap per category per refresh
-MAX_ITEMS_PER_FEED    = 60   # story cap per feed
-PER_REQUEST_TIMEOUT   = 5    # seconds
-DISK_CACHE_TTL_SEC    = 600  # 10 minutes
-DISK_CACHE_DIR        = "data"
-DISK_CACHE_PATH       = os.path.join(DISK_CACHE_DIR, "news_cache.json")
+# ---- Tunables for Render free-tier ----
+MAX_TOTAL_FEEDS         = 64   # total external feeds per refresh (raised a bit but still safe)
+MANDATORY_PER_CATEGORY  = 2    # always include first N feeds for every category (if present)
+OPTIONAL_PER_CATEGORY   = 2    # then rotate up to this many more, per category
+MAX_ITEMS_PER_FEED      = 60
+PER_REQUEST_TIMEOUT     = 5
+DISK_CACHE_TTL_SEC      = 600  # 10 minutes
+DISK_CACHE_DIR          = "data"
+DISK_CACHE_PATH         = os.path.join(DISK_CACHE_DIR, "news_cache.json")
 
-# ---- Time parsing (tz-safe to UTC) ----
+# ---- Time parsing (tz-safe → UTC) ----
 from dateutil import parser as dtparser
-from datetime import datetime, timezone, timedelta
+from datetime import timezone, timedelta
 
 _TZINFOS = {
     "UTC": 0, "GMT": 0,
@@ -48,13 +49,13 @@ def _to_utc(ts_str: str) -> pd.Timestamp:
     except Exception:
         return pd.Timestamp.utcnow().tz_localize("UTC")
 
-# ---- Disk cache helpers ----
+# ---- Disk cache ----
 def _cache_write(df: pd.DataFrame):
     try:
         os.makedirs(DISK_CACHE_DIR, exist_ok=True)
         payload = {
             "ts": time.time(),
-            "rows": df.assign(published_dt=df["published_dt"].astype(str)).to_dict(orient="records")
+            "rows": df.assign(published_dt=df["published_dt"].astype(str)).to_dict(orient="records"),
         }
         with open(DISK_CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(payload, f)
@@ -73,8 +74,6 @@ def _cache_read() -> pd.DataFrame | None:
         if not rows:
             return None
         df = pd.DataFrame(rows)
-        if df.empty:
-            return None
         df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(
             pd.Timestamp.utcnow().tz_localize("UTC")
         )
@@ -82,7 +81,7 @@ def _cache_read() -> pd.DataFrame | None:
     except Exception:
         return None
 
-# ---- Fetchers ----
+# ---- Helpers ----
 def _domain(url: str) -> str:
     try:
         return urlparse(url).netloc.replace("www.", "")
@@ -129,14 +128,35 @@ def _fetch_feed(url: str, max_items: int = MAX_ITEMS_PER_FEED, timeout: int = PE
         pass
     return items
 
-# ---- Main public API ----
+# ---- Planning (coverage-first) ----
+def _plan_feeds(catalog: Dict[str, List[str]]) -> List[Tuple[str, str]]:
+    mandatory: List[Tuple[str, str]] = []
+    optional:  List[Tuple[str, str]] = []
+
+    for cat, urls in catalog.items():
+        urls = list(urls)
+        # Always include the first N as "mandatory"
+        for u in urls[:MANDATORY_PER_CATEGORY]:
+            mandatory.append((cat, u))
+        # Take rotated optional URLs next
+        rest = urls[MANDATORY_PER_CATEGORY:]
+        random.shuffle(rest)
+        for u in rest[:OPTIONAL_PER_CATEGORY]:
+            optional.append((cat, u))
+
+    random.shuffle(mandatory)
+    random.shuffle(optional)
+
+    plan = mandatory + optional
+    return plan[:MAX_TOTAL_FEEDS]
+
+# ---- Public API ----
 def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
     """
-    Returns DataFrame with columns:
-    category, source, title, link, summary, published_dt (UTC tz-aware)
-    Uses disk cache (10 min). Caps total RSS hits to stay responsive on cold starts.
+    Returns DataFrame with: category, source, title, link, summary, published_dt (UTC tz-aware).
+    Uses disk cache (10 min) and coverage-first planning so every category gets at least some headlines.
     """
-    # Serve from disk cache if fresh
+    # Serve from cache if fresh
     cached = _cache_read()
     if cached is not None and not cached.empty:
         return cached
@@ -148,15 +168,7 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
     except Exception:
         catalog = {}
 
-    # Build a capped list of feeds to hit this refresh
-    planned: List[tuple[str, str]] = []  # (category, url)
-    for category, urls in catalog.items():
-        urls = list(urls)
-        random.shuffle(urls)
-        for u in urls[:MAX_FEEDS_PER_CATEGORY]:
-            planned.append((category, u))
-    random.shuffle(planned)
-    planned = planned[:MAX_TOTAL_FEEDS]
+    planned = _plan_feeds(catalog)
 
     rows: List[Dict] = []
     for category, url in planned:
@@ -172,17 +184,15 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     if df.empty:
-        # If network completely fails, still return previous cache if any (even if stale)
         stale = _cache_read()
         return stale if stale is not None else df
 
-    df["title"] = df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+    df["title"] = df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.trim()
     df["summary"] = df["summary"].fillna("").astype(str)
     df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(
         pd.Timestamp.utcnow().tz_localize("UTC")
     )
     df = df.sort_values("published_dt", ascending=False).reset_index(drop=True)
 
-    # Write to disk cache for next cold start
     _cache_write(df)
     return df
