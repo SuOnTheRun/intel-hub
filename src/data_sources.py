@@ -196,3 +196,29 @@ def category_metrics() -> pd.DataFrame:
     if not df.empty:
         df = df.sort_values("category").reset_index(drop=True)
     return df
+
+
+# ------------------------------
+# DATA ROUTERS FOR US
+# ------------------------------
+from .collectors import (
+    collect_us_google_news,
+    collect_us_gdelt_events,
+    collect_us_trends,
+    collect_us_fred
+)
+from .analytics import score_text_sentiment
+
+def load_us_news() -> pd.DataFrame:
+    df = collect_us_google_news(categories=["retail", "qsr", "consumer", "smartphone", "auto car"])
+    df = score_text_sentiment(df, text_col="title")
+    return df
+
+def load_us_incidents() -> pd.DataFrame:
+    return collect_us_gdelt_events(hours_back=48)
+
+def load_us_trends() -> pd.DataFrame:
+    return collect_us_trends(days=90)
+
+def load_us_macro() -> pd.DataFrame:
+    return collect_us_fred()
