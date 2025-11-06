@@ -1,224 +1,147 @@
-"""
-data_sources.py
-
-Category-level market & trends signals for the Intelligence Hub.
-
-- Google Trends momentum (past 7 days) via pytrends
-- Market % change (past ~5 trading days) via yfinance
-- Categories aligned 1:1 with news_rss_catalog.json:
-  Consumer Staples, Energy, Technology, Automotive, Financials,
-  Media & Advertising, Healthcare, Telecom, Retail & E-commerce,
-  Defense & Security, Real Estate, Metals & Mining, Agriculture, Climate & ESG
-"""
-
-from __future__ import annotations
-
+import asyncio
+import aiohttp
+import feedparser
 import pandas as pd
-import numpy as np
-import yfinance as yf
-from pytrends.request import TrendReq
-from datetime import datetime, timezone
-from dateutil.relativedelta import relativedelta
+from datetime import datetime, timedelta, timezone
+from bs4 import BeautifulSoup
+from typing import List, Dict
 
-# --- Google Trends client (IST tz offset 330 minutes keeps parity with your UI) ---
-pytrends = TrendReq(hl="en-US", tz=330)
+from .data_sources import news_catalog, gov_catalog, social_catalog
+from .store import ttl_cache
 
+UTC = timezone.utc
 
-# -----------------------------
-# Category → Google Trends terms
-# Keep these high-signal and generic so they work globally and over time.
-# -----------------------------
-CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "Consumer Staples": ["FMCG", "consumer staples", "packaged food", "household products"],
-    "Energy": ["oil", "natural gas", "OPEC", "renewable energy", "LNG"],
-    "Technology": ["artificial intelligence", "semiconductor", "data center", "cloud computing", "cybersecurity"],
-    "Automotive": ["electric vehicle", "battery", "autonomous car", "automotive industry"],
-    "Financials": ["banking", "fintech", "payments", "nbfc", "insurance"],
-    "Media & Advertising": ["advertising", "adtech", "programmatic", "CTV", "retail media"],
-    "Healthcare": ["pharma", "biotech", "clinical trial", "vaccine", "healthcare"],
-    "Telecom": ["5G", "mobile network", "fiber broadband", "telecommunications"],
-    "Retail & E-commerce": ["ecommerce", "retail", "consumer spending", "marketplace"],
-    "Defense & Security": ["defense", "military", "geopolitics", "national security"],
-    "Real Estate": ["real estate", "housing market", "REIT", "construction"],
-    "Metals & Mining": ["copper", "steel", "aluminium", "mining"],
-    "Agriculture": ["agriculture", "fertilizer", "crop output", "monsoon"],
-    "Climate & ESG": ["climate change", "ESG", "sustainability", "carbon emissions", "net zero"]
-}
+def _normalize_items(feed_url: str, fp):
+    records = []
+    for e in fp.entries:
+        title = getattr(e, "title", "") or ""
+        link  = getattr(e, "link", "") or ""
+        published = getattr(e, "published", getattr(e, "updated", ""))
+        summary = BeautifulSoup(getattr(e, "summary", ""), "lxml").text
+        records.append({"source": feed_url, "title": title, "link": link, "published": published, "summary": summary})
+    return records
 
-# -----------------------------
-# Category → liquid market proxies (ETFs / futures / large-caps / indices)
-# Choose instruments that are broadly available via Yahoo Finance.
-# We average their 5-day % change as the category market signal.
-# -----------------------------
-CATEGORY_TICKERS: dict[str, list[str]] = {
-    # Consumer staples: U.S. staples ETF + global mega-caps
-    "Consumer Staples": ["XLP", "PG", "UL"],
-    # Energy: sector ETF + crude & natgas futures + oil majors
-    "Energy": ["XLE", "CL=F", "NG=F", "XOM", "BP"],
-    # Technology: sector ETF + chips & mega-cap tech
-    "Technology": ["XLK", "SMH", "NVDA", "AAPL", "^NDX"],
-    # Automotive: EV + legacy autos
-    "Automotive": ["TSLA", "F", "GM", "RIVN"],
-    # Financials: sector ETF + money center banks + India bank index
-    "Financials": ["XLF", "JPM", "BAC", "^NSEBANK"],
-    # Media & Advertising: ad platforms + CTV + trade-desk proxy
-    "Media & Advertising": ["GOOGL", "META", "TTD", "ROKU"],
-    # Healthcare: sector ETF + diversified healthcare bellwethers
-    "Healthcare": ["XLV", "JNJ", "UNH", "PFE"],
-    # Telecom: telecom ETF + U.S. telcos (T-Mobile aligns with Blis ownership)
-    "Telecom": ["IYZ", "TMUS", "VZ", "T"],
-    # Retail & E-commerce: retail ETF + leaders across regions
-    "Retail & E-commerce": ["XRT", "AMZN", "BABA", "SHOP"],
-    # Defense & Security: aerospace & defense ETF + primes
-    "Defense & Security": ["ITA", "LMT", "RTX", "NOC"],
-    # Real Estate: REIT ETF + a flagship REIT + homebuilder proxy
-    "Real Estate": ["VNQ", "SPG", "XHB"],
-    # Metals & Mining: metals & mining ETF + global miners
-    "Metals & Mining": ["XME", "BHP", "RIO", "GLEN.L"],
-    # Agriculture: ag ETF + fertilizer majors
-    "Agriculture": ["DBA", "MOS", "NTR"],
-    # Climate & ESG: clean energy ETF + leading solar names
-    "Climate & ESG": ["ICLN", "ENPH", "FSLR", "PLUG"]
-}
+async def _fetch_feed(session, url: str):
+    async with session.get(url, timeout=20) as r:
+        content = await r.read()
+        fp = feedparser.parse(content)
+        return _normalize_items(url, fp)
 
+async def _gather(feeds: List[str]):
+    async with aiohttp.ClientSession() as session:
+        tasks = [_fetch_feed(session, u) for u in feeds]
+        out = await asyncio.gather(*tasks, return_exceptions=True)
+        rows = []
+        for o in out:
+            if isinstance(o, Exception):
+                continue
+            rows.extend(o)
+        return pd.DataFrame(rows)
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def _safe_mean(values: list[float]) -> float:
-    vs = [float(v) for v in values if pd.notna(v)]
-    return float(np.mean(vs)) if len(vs) else 0.0
-
-
-def get_trends_score(keyword_list: list[str]) -> float:
-    """
-    Returns a single momentum score for a list of keywords by taking the mean
-    Google Trends interest over the past 7 days across those terms.
-    Robust to API hiccups; returns 0.0 on failure.
-    """
-    try:
-        kw = keyword_list[:5] if len(keyword_list) > 5 else keyword_list
-        if not kw:
-            return 0.0
-        pytrends.build_payload(kw, timeframe="now 7-d", geo="")
-        df = pytrends.interest_over_time()
-        if df is None or df.empty:
-            return 0.0
-        # Drop "isPartial" if present, average across terms then time.
-        cols = [c for c in df.columns if c != "isPartial"]
-        if not cols:
-            return 0.0
-        return float(df[cols].mean(axis=1).mean())
-    except Exception:
-        return 0.0
-
-
-def get_market_change(symbols: list[str], lookback_days: int = 7) -> float:
-    """
-    Downloads recent prices for a list of tickers and returns the average %
-    change from the first to the last available close within ~lookback_days.
-    Uses auto_adjust=True to handle splits/dividends.
-    """
-    if not symbols:
-        return 0.0
-    try:
-        end = datetime.now(timezone.utc)
-        start = end - relativedelta(days=lookback_days)
-        data = yf.download(
-            symbols,
-            start=start.date(),
-            end=end.date(),
-            progress=False,
-            group_by="ticker",
-            auto_adjust=True,
-            threads=True,
-        )
-        pct_changes: list[float] = []
-
-        # yfinance returns either a simple DataFrame (single ticker) or a MultiIndex
-        if isinstance(data.columns, pd.MultiIndex):
-            # Multi-ticker
-            for s in symbols:
-                try:
-                    if s not in data.columns.get_level_values(0):
-                        continue
-                    series = data[s]["Close"].dropna()
-                    if len(series) >= 2 and series.iloc[0] != 0:
-                        pct = (series.iloc[-1] - series.iloc[0]) / series.iloc[0] * 100.0
-                        pct_changes.append(float(pct))
-                except Exception:
-                    continue
-        else:
-            # Single-ticker or yfinance flattened structure
-            series = data.get("Close", pd.Series(dtype=float)).dropna()
-            if len(series) >= 2 and series.iloc[0] != 0:
-                pct = (series.iloc[-1] - series.iloc[0]) / series.iloc[0] * 100.0
-                pct_changes.append(float(pct))
-
-        return _safe_mean(pct_changes)
-    except Exception:
-        return 0.0
-
-
-# -----------------------------
-# Public API
-# -----------------------------
-def category_metrics() -> pd.DataFrame:
-    """
-    Computes per-category signals:
-      - trends: Google Trends momentum (0–100 scale, averaged across terms)
-      - market_pct: average 5–7 day percent change across mapped tickers
-    Returns a DataFrame with columns: [category, trends, market_pct]
-    """
-    rows = []
-    for cat, kws in CATEGORY_KEYWORDS.items():
+def _within(df: pd.DataFrame, days: int):
+    def to_dt(x):
         try:
-            trends = get_trends_score(kws)
+            return pd.to_datetime(x, utc=True)
         except Exception:
-            trends = 0.0
+            return pd.NaT
+    df = df.copy()
+    df["published_dt"] = df["published"].apply(to_dt)
+    cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=days)
+    return df[df["published_dt"] >= cutoff].sort_values("published_dt", ascending=False).reset_index(drop=True)
 
-        tickers = CATEGORY_TICKERS.get(cat, [])
-        try:
-            market = get_market_change(tickers, lookback_days=7)
-        except Exception:
-            market = 0.0
+class NewsCollector:
+    @ttl_cache(ttl_seconds=900)
+    def collect(self, categories: List[str], max_items: int = 100, lookback_days: int = 3) -> pd.DataFrame:
+        catalog = news_catalog()
+        feeds = []
+        for c in categories:
+            feeds.extend(catalog.get(c, []))
+        feeds = list(dict.fromkeys(feeds))  # dedupe
+        df = asyncio.run(_gather(feeds))
+        df = _within(df, lookback_days)
+        return df.head(max_items * len(categories))
 
-        rows.append(
-            {
-                "category": cat,
-                "trends": float(trends),
-                "market_pct": float(market),
-            }
-        )
+class GovCollector:
+    @ttl_cache(ttl_seconds=900)
+    def collect(self, max_items: int = 200, lookback_days: int = 7) -> pd.DataFrame:
+        feeds = sum(gov_catalog().values(), [])
+        df = asyncio.run(_gather(feeds))
+        df = _within(df, lookback_days)
+        return df.head(max_items)
 
-    df = pd.DataFrame(rows)
-    # Ensure stable category ordering for readability
-    if not df.empty:
-        df = df.sort_values("category").reset_index(drop=True)
-    return df
+class SocialCollector:
+    @ttl_cache(ttl_seconds=900)
+    def collect(self, categories: List[str], max_items: int = 120, lookback_days: int = 3) -> pd.DataFrame:
+        cat = social_catalog()
+        feeds = []
+        for c in categories:
+            feeds.extend(cat.get(c, []))
+        df = asyncio.run(_gather(list(set(feeds))))
+        df = _within(df, lookback_days)
+        return df.head(max_items)
 
+class MacroCollector:
+    @ttl_cache(ttl_seconds=900)
+    def collect(self, lookback_days: int = 7) -> pd.DataFrame:
+        # Macro via Google Trends interest for broad terms as a light, always-on signal
+        from pytrends.request import TrendReq
+        pytrends = TrendReq(hl='en-US', tz=360)
+        kw = ["inflation", "recession", "unemployment", "interest rates", "housing market"]
+        pytrends.build_payload(kw_list=kw, timeframe="now 7-d", geo="US")
+        df = pytrends.interest_over_time().reset_index().rename(columns={"date":"timestamp"})
+        return df
 
-# ------------------------------
-# DATA ROUTERS FOR US
-# ------------------------------
-from .collectors import (
-    collect_us_google_news,
-    collect_us_gdelt_events,
-    collect_us_trends,
-    collect_us_fred
-)
-from .analytics import score_text_sentiment
+class TrendsCollector:
+    @ttl_cache(ttl_seconds=900)
+    def collect(self, categories: List[str], lookback_days: int = 30) -> pd.DataFrame:
+        from pytrends.request import TrendReq
+        pytrends = TrendReq(hl='en-US', tz=360)
+        cat2kw = {
+            "Technology": ["AI", "semiconductor", "cloud computing", "cybersecurity"],
+            "Consumer": ["consumer spending", "loyalty program", "subscription", "discount"],
+            "Energy": ["oil price", "gasoline price", "renewable energy"],
+            "Healthcare": ["drug approval", "FDA recall", "telemedicine"],
+            "Finance": ["bank earnings", "credit card delinquency", "ETF"],
+            "Retail": ["foot traffic", "omnichannel", "same-day delivery"],
+            "Autos": ["EV sales", "hybrid car", "dealer inventory"],
+            "Macro": ["inflation", "interest rates", "housing market"],
+        }
+        kw = []
+        for c in categories:
+            kw += cat2kw.get(c, [])
+        kw = list(dict.fromkeys(kw))[:5] or ["macro"]
+        pytrends.build_payload(kw_list=kw, timeframe=f"now {lookback_days}-d", geo="US")
+        df = pytrends.interest_over_time().reset_index().rename(columns={"date":"timestamp"})
+        df["category"] = " / ".join(categories)
+        return df
 
-def load_us_news() -> pd.DataFrame:
-    df = collect_us_google_news(categories=["retail", "qsr", "consumer", "smartphone", "auto car"])
-    df = score_text_sentiment(df, text_col="title")
-    return df
+class MobilityCollector:
+    @ttl_cache(ttl_seconds=1800)
+    def collect(self) -> pd.DataFrame:
+        # TSA checkpoint throughput: official daily table
+        url = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
+        df = pd.read_csv(url)
+        df = df.rename(columns={"Date":"date", "Total Traveler Throughput":"throughput"}).dropna()
+        df["date"] = pd.to_datetime(df["date"])
+        return df.sort_values("date", ascending=False).head(30).reset_index(drop=True)
 
-def load_us_incidents() -> pd.DataFrame:
-    return collect_us_gdelt_events(hours_back=48)
-
-def load_us_trends() -> pd.DataFrame:
-    return collect_us_trends(days=90)
-
-def load_us_macro() -> pd.DataFrame:
-    return collect_us_fred()
+class StocksCollector:
+    @ttl_cache(ttl_seconds=300)
+    def collect(self, tickers: List[str]) -> pd.DataFrame:
+        import yfinance as yf
+        frames = []
+        for t in tickers:
+            try:
+                info = yf.Ticker(t).history(period="5d")[-1:]
+                if not info.empty:
+                    last = info.iloc[0]
+                    frames.append({
+                        "ticker": t,
+                        "price": float(last["Close"]),
+                        "change": float(last["Close"] - last["Open"]),
+                        "pct": float((last["Close"] - last["Open"]) / last["Open"] * 100.0),
+                        "volume": int(last["Volume"]),
+                    })
+            except Exception:
+                continue
+        return pd.DataFrame(frames).sort_values("pct", ascending=False).reset_index(drop=True)
