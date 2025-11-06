@@ -79,3 +79,21 @@ def render_risk_or_map(gdelt_df, air_df, region_center_tuple, events_df_for_tile
     from .ui import render_region_risk_tiles
     rr = region_risk_table(events_df_for_tiles)
     render_region_risk_tiles(rr)
+# src/maps.py
+import pandas as pd
+
+def kepler_us_incidents_layer(df: pd.DataFrame) -> dict:
+    """
+    Returns a basic Kepler layer config; you can replace with your full config later.
+    """
+    if df is None or df.empty:
+        return {"data": {"fields": [], "rows": []}, "config": {}}
+
+    table = {
+        "data": {
+            "fields": [{"name": c, "type": "string"} for c in df.columns],
+            "rows": df.astype(str).values.tolist()
+        },
+        "config": {"version": "v1"}
+    }
+    return table
