@@ -62,3 +62,20 @@ def download_buttons(
     _place("Download Air Traffic CSV", air_df)
     _place("Download Trends CSV", trends_df)
     _place("Download Reddit CSV", reddit_df)
+
+# src/exporters.py
+import os
+import pandas as pd
+
+def export_us_snapshot(news_df, trends_df, macro_df, bri_df, out_dir="exports"):
+    os.makedirs(out_dir, exist_ok=True)
+    ts = pd.Timestamp.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    if news_df is not None and not news_df.empty:
+        news_df.to_csv(os.path.join(out_dir, f"us_news_{ts}.csv"), index=False)
+    if trends_df is not None and not trends_df.empty:
+        trends_df.to_csv(os.path.join(out_dir, f"us_trends_{ts}.csv"), index=False)
+    if macro_df is not None and not macro_df.empty:
+        macro_df.to_csv(os.path.join(out_dir, f"us_macro_{ts}.csv"), index=False)
+    if bri_df is not None and not bri_df.empty:
+        bri_df.to_csv(os.path.join(out_dir, f"us_bri_{ts}.csv"), index=False)
+
