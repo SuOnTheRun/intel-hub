@@ -10,7 +10,8 @@ pydantic==2.8.2
 nltk==3.9.1
 scikit-learn==1.5.2
 spacy==3.7.4
-en-core-web-sm==3.7.1
+# IMPORTANT: install spaCy model via wheel URL (works on Render)
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 yfinance==0.2.43
 pytrends==4.9.2
 requests==2.32.3
