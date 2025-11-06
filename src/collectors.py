@@ -32,18 +32,21 @@ except Exception:
 # -----------------------------
 # Tunables for Render free-tier
 # -----------------------------
-MAX_TOTAL_FEEDS         = 64   # total external feeds per refresh
-MANDATORY_PER_CATEGORY  = 2    # always include first N feeds for every category
-OPTIONAL_PER_CATEGORY   = 2    # then rotate up to this many more per category
+MAX_TOTAL_FEEDS         = 64
+MANDATORY_PER_CATEGORY  = 2
+OPTIONAL_PER_CATEGORY   = 2
 MAX_ITEMS_PER_FEED      = 60
 PER_REQUEST_TIMEOUT     = 8
 DISK_CACHE_TTL_SEC      = 600  # 10 minutes
 DISK_CACHE_DIR          = "data"
 DISK_CACHE_PATH         = os.path.join(DISK_CACHE_DIR, "news_cache.json")
 
-# ---- Time parsing (tz-safe → UTC) ----
+# ---- UTC helpers ----
 from dateutil import parser as dtparser
 from datetime import timezone as _tz, timedelta as _td
+
+def utcnow() -> pd.Timestamp:
+    return pd.Timestamp.now(tz="UTC")
 
 _TZINFOS = {
     "UTC": 0, "GMT": 0,
@@ -59,14 +62,14 @@ _TZINFOS = {
 
 def _to_utc(ts_str: str) -> pd.Timestamp:
     if not ts_str:
-        return pd.Timestamp.utcnow().tz_localize("UTC")
+        return utcnow()
     try:
         dt = dtparser.parse(ts_str, tzinfos={k: _td(seconds=v) for k, v in _TZINFOS.items()})
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=_tz.utc)
         return pd.Timestamp(dt.astimezone(_tz.utc))
     except Exception:
-        return pd.Timestamp.utcnow().tz_localize("UTC")
+        return utcnow()
 
 # -----------------------------
 # Disk cache for planned-news snapshot
@@ -95,9 +98,7 @@ def _cache_read() -> pd.DataFrame | None:
         if not rows:
             return None
         df = pd.DataFrame(rows)
-        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(
-            pd.Timestamp.utcnow().tz_localize("UTC")
-        )
+        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(utcnow())
         return df.sort_values("published_dt", ascending=False).reset_index(drop=True)
     except Exception:
         return None
@@ -129,11 +130,11 @@ def _fetch_feed(url: str, max_items: int = MAX_ITEMS_PER_FEED, timeout: int = PE
                         t = time.mktime(getattr(e, "published_parsed"))
                         published = pd.Timestamp(t, unit="s", tz="UTC")
                     except Exception:
-                        published = pd.Timestamp.utcnow().tz_localize("UTC")
+                        published = utcnow()
                 items.append({"title": title, "link": link, "summary": desc, "published_dt": published})
             return items
 
-        # Fallback XML when feedparser unavailable
+        # Fallback XML
         req = urllib.request.Request(url, headers={"User-Agent": "intel-hub/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = r.read()
@@ -176,12 +177,10 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
     Returns DataFrame with: category, source, title, link, summary, published_dt (UTC tz-aware).
     Uses disk cache (10 min) and coverage-first planning so every category gets at least some headlines.
     """
-    # Serve from cache if fresh
     cached = _cache_read()
     if cached is not None and not cached.empty:
         return cached
 
-    # Load catalog
     try:
         with open(catalog_path, "r", encoding="utf-8") as f:
             catalog = json.load(f)
@@ -199,7 +198,7 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
                 "title": it.get("title", ""),
                 "link": it.get("link", ""),
                 "summary": it.get("summary", ""),
-                "published_dt": it.get("published_dt", pd.Timestamp.utcnow().tz_localize("UTC")),
+                "published_dt": it.get("published_dt", utcnow()),
             })
 
     df = pd.DataFrame(rows)
@@ -207,21 +206,16 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
         stale = _cache_read()
         return stale if stale is not None else df
 
-    # Cleaning
     try:
-        df["title"] = (
-            df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
-        )
+        df["title"] = df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
         df["summary"] = df["summary"].fillna("").astype(str)
     except Exception:
         pass
 
     try:
-        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(
-            pd.Timestamp.utcnow().tz_localize("UTC")
-        )
+        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(utcnow())
     except Exception:
-        df["published_dt"] = pd.Timestamp.utcnow().tz_localize("UTC")
+        df["published_dt"] = utcnow()
 
     df = df.sort_values("published_dt", ascending=False).reset_index(drop=True)
     _cache_write(df)
@@ -247,9 +241,7 @@ def _to_dt(x):
 
 # 1) Google News RSS (US)
 def collect_us_google_news(categories: list[str] | None = None, max_items: int = 400) -> pd.DataFrame:
-    base_feeds = [
-        "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
-    ]
+    base_feeds = ["https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"]
     categories = categories or []
     for cat in categories:
         base_feeds.append(f"https://news.google.com/rss/search?q={requests.utils.quote(cat)}&hl=en-US&gl=US&ceid=US:en")
@@ -361,7 +353,7 @@ def collect_us_trends(keywords: list[str] | None = None, days: int = 90) -> pd.D
     out["date"] = pd.to_datetime(out["date"], utc=True)
     return out.sort_values("date")
 
-# 4) FRED macro series (UMich Sentiment, Retail Sales, Unemployment)
+# 4) FRED macro series
 _FRED_SERIES = {
     "UMCSENT": "consumer_sentiment",
     "RSAFS": "retail_sales",
@@ -398,19 +390,13 @@ def collect_us_fred() -> pd.DataFrame:
 from .data_sources import news_catalog, gov_catalog, social_catalog
 
 class NewsCollector:
-    """
-    Coverage-first news across selected categories using the repo's news_rss_catalog.json.
-    """
     def collect(self, categories: List[str], max_items: int = 100, lookback_days: int = 3) -> pd.DataFrame:
-        # Pull planned snapshot across all categories then filter
         df = get_news_dataframe(os.path.join(os.path.dirname(__file__), "..", "news_rss_catalog.json"))
         if not df.empty and categories:
-            mask = df["category"].isin(categories)
-            df = df[mask]
+            df = df[df["category"].isin(categories)]
         if lookback_days:
-            cutoff = pd.Timestamp.utcnow().tz_localize("UTC") - pd.Timedelta(days=lookback_days)
+            cutoff = utcnow() - pd.Timedelta(days=lookback_days)
             df = df[df["published_dt"] >= cutoff]
-        # Cap roughly per category
         if not df.empty:
             df = (
                 df.sort_values("published_dt", ascending=False)
@@ -422,11 +408,10 @@ class NewsCollector:
 
 class GovCollector:
     def collect(self, max_items: int = 200, lookback_days: int = 7) -> pd.DataFrame:
-        # Reuse the same machinery with the gov catalog
         path = os.path.join(os.path.dirname(__file__), "..", "gov_regulatory_feeds.json")
         df = get_news_dataframe(path)
         if lookback_days:
-            cutoff = pd.Timestamp.utcnow().tz_localize("UTC") - pd.Timedelta(days=lookback_days)
+            cutoff = utcnow() - pd.Timedelta(days=lookback_days)
             df = df[df["published_dt"] >= cutoff]
         return df.groupby("source", group_keys=False).head(max_items).reset_index(drop=True)
 
@@ -437,13 +422,12 @@ class SocialCollector:
         if categories:
             df = df[df["category"].isin(categories)]
         if lookback_days:
-            cutoff = pd.Timestamp.utcnow().tz_localize("UTC") - pd.Timedelta(days=lookback_days)
+            cutoff = utcnow() - pd.Timedelta(days=lookback_days)
             df = df[df["published_dt"] >= cutoff]
         return df.groupby("category", group_keys=False).head(max_items).reset_index(drop=True)
 
 class MacroCollector:
     def collect(self, lookback_days: int = 7) -> pd.DataFrame:
-        # A lightweight macro signal via Google Trends (no key)
         if TrendReq is None:
             return pd.DataFrame(columns=["timestamp"])
         pytrends = TrendReq(hl='en-US', tz=360)
@@ -484,7 +468,6 @@ class TrendsCollector:
 
 class MobilityCollector:
     def collect(self) -> pd.DataFrame:
-        # TSA checkpoint throughput: official daily table
         url = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
         try:
             df = pd.read_csv(url)
