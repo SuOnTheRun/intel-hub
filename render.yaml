@@ -2,8 +2,11 @@ services:
   - type: web
     name: intel-hub
     env: python
-    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run src/ui_us.py --server.port $PORT --server.address 0.0.0.0
-    autoDeploy: true
-    healthCheckPath: /
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    plan: free
+    envVars:
+      - key: REGION
+        value: US
+      - key: USE_ROBERTA
+        value: "0"   # keep 0 on free tier; switch to 1 when you add HF token & transformers
