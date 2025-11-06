@@ -1,246 +1,95 @@
-# app.py — Intelligence Hub (stable, cached, coverage-first collectors + Alert Ribbon)
-
-import os, sys, importlib
-import streamlit as st
+import os
+import time
 import pandas as pd
-from datetime import datetime
-from zoneinfo import ZoneInfo
+import streamlit as st
+from datetime import datetime, timedelta
 
-# ---------- importable ./src ----------
-HERE = os.path.dirname(__file__)
-SRC_DIR = os.path.join(HERE, "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+from src.collectors import NewsCollector, GovCollector, MacroCollector, TrendsCollector, MobilityCollector, StocksCollector, SocialCollector
+from src.analytics import aggregate_category_metrics, build_kpi_cards
+from src.emotions import score_sentiment_batch
+from src.entities import extract_entities_batch
+from src.narratives import cluster_topics
+from src.theming import inject_css
+from src.exporters import export_dataframe_csv
+from src.risk_model import compute_risk_index
+from src.ui_us import render_command_center, render_category_page, render_sources_sidebar
+from src.store import cache_df
 
-# Optional timezone detection from browser
-try:
-    from streamlit_javascript import st_javascript
-except Exception:
-    st_javascript = None
+st.set_page_config(page_title="Intelligence Hub — US", page_icon=None, layout="wide")
 
-st.set_page_config(
-    page_title="Intelligence Hub",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+inject_css()
 
-# ---------- Safe import helper ----------
-def _try_import(module_name, alt_names=()):
-    last_err = None
-    for name in (module_name, *alt_names):
-        try:
-            return importlib.import_module(name)
-        except Exception as e:
-            last_err = e
-    if last_err:
-        raise last_err
+st.sidebar.title("Intelligence Hub — US")
+categories = ["Macro", "Technology", "Consumer", "Energy", "Healthcare", "Finance", "Retail", "Autos"]
+selected_cats = st.sidebar.multiselect("Categories", categories, default=["Macro","Technology","Consumer"])
+lookback_days = st.sidebar.slider("Lookback (days)", 1, 14, 3)
+max_items = st.sidebar.slider("Max stories per source", 20, 200, 80, step=10)
+st.sidebar.markdown("---")
 
-# ---------- Bring in project modules ----------
-try:
-    collectors = _try_import("src.collectors", ("collectors",))
-    emotions   = _try_import("src.emotions", ("emotions",))
-    datasrc    = _try_import("src.data_sources", ("data_sources",))
-    analytics  = _try_import("src.analytics", ("analytics",))
-    narratives = _try_import("src.narratives", ("narratives",))
-    entities   = _try_import("src.entities", ("entities",))
-    riskmodel  = _try_import("src.risk_model", ("risk_model",))
-    alertsmod  = _try_import("src.alerts", ("alerts",))
-    ui         = _try_import("src.ui", ("ui",))
-except Exception as import_err:
-    st.error("Startup import failed — details below.")
-    st.exception(import_err)
-    st.stop()
+with st.sidebar.expander("Sources"):
+    render_sources_sidebar()
 
-# ---------- Utilities ----------
-def get_viewer_now():
-    """Local time for the viewer, falling back to Asia/Kolkata."""
-    tz_fallback = "Asia/Kolkata"
-    tz_name = None
-    if st_javascript is not None:
-        try:
-            tz_name = st_javascript("Intl.DateTimeFormat().resolvedOptions().timeZone")
-        except Exception:
-            tz_name = None
-    if not tz_name:
-        tz_name = tz_fallback
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo(tz_fallback)
-    return datetime.now(tz)
+st.sidebar.markdown("---")
+st.sidebar.caption("All data from public/free sources. Updated on load.")
 
-# ---------- Caches ----------
-@st.cache_data(ttl=15 * 60, show_spinner=False)
-def load_news_df(catalog_path: str) -> pd.DataFrame:
-    df = collectors.get_news_dataframe(catalog_path)
-    df = emotions.add_sentiment(df)
-    return df
+# Collect
+with st.spinner("Collecting live signals..."):
+    news = NewsCollector().collect(selected_cats, max_items=max_items, lookback_days=lookback_days)
+    gov = GovCollector().collect(max_items=120, lookback_days=lookback_days)
+    social = SocialCollector().collect(selected_cats, max_items=120, lookback_days=lookback_days)
+    macro = MacroCollector().collect(lookback_days=lookback_days)
+    trends = TrendsCollector().collect(selected_cats, lookback_days=30)
+    mobility = MobilityCollector().collect()
+    stocks = StocksCollector().collect(["^GSPC","^IXIC","^DJI","AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA"])
 
-@st.cache_data(ttl=10 * 60, show_spinner=False)
-def load_category_metrics() -> pd.DataFrame:
-    return datasrc.category_metrics()
+all_text = pd.concat([news["title"], social["title"].fillna("")], axis=0).astype(str).tolist()
 
-@st.cache_data(ttl=5 * 60, show_spinner=False)
-def cached_external_alerts(catalog_path: str):
-    try:
-        return alertsmod.collect_policy_geo_cyber(catalog_path)
-    except Exception:
-        return []
+# Sentiment & Entities
+sent_df = score_sentiment_batch(all_text)
+ent_df = extract_entities_batch(all_text)
 
-# ---------- Sidebar ----------
-st.sidebar.title("Intelligence Hub")
-page = st.sidebar.radio(
-    " ",
-    ["Command Center", "Regions", "Categories", "Markets", "Social", "My Data", "Methods"],
-    index=0,
-)
-st.sidebar.caption(f"Updated: {get_viewer_now().strftime('%d %b %Y, %H:%M %Z')}")
+# Narratives (light)
+topics = cluster_topics(pd.DataFrame({"text": all_text}))
 
-ext_alerts_on = st.sidebar.toggle(
-    "External alert feeds (policy/geo/cyber)",
-    value=False,
-    help="Turn on to pull regulator/geo/cyber advisories. Cached for 5 minutes."
-)
+# Merge back to news & social
+news = news.copy()
+news["sentiment"] = score_sentiment_batch(news["title"].astype(str))["compound"].values
+social["sentiment"] = score_sentiment_batch(social["title"].astype(str))["compound"].values
 
-# Force refresh (clears disk + memory cache for news/metrics; keeps Streamlit session alive)
-if st.sidebar.button("Force refresh data"):
-    try:
-        os.remove("data/news_cache.json")
-    except Exception:
-        pass
-    try:
-        load_news_df.clear()
-        load_category_metrics.clear()
-    except Exception:
-        pass
-    st.experimental_rerun()
+# Aggregates & Risk
+kpis = aggregate_category_metrics(news, social, trends, stocks)
+risk = compute_risk_index(news, social, trends, stocks)
 
-# ---------- Preload core data ----------
-with st.spinner("Fetching live signals…"):
-    try:
-        news_df = load_news_df("src/news_rss_catalog.json")
-    except Exception:
-        news_df = pd.DataFrame(columns=["category","title","link","summary","source","published_dt","sentiment"])
-    try:
-        base = load_category_metrics()
-    except Exception:
-        base = pd.DataFrame(columns=["category","trends","market_pct"])
-    try:
-        heat = analytics.build_category_heatmap(news_df, base)
-    except Exception:
-        heat = pd.DataFrame(columns=["category","news_z","sentiment","market_pct","composite","news_count","trends"])
+# Cache snapshots (optional)
+cache_df("news", news)
+cache_df("gov", gov)
+cache_df("social", social)
+cache_df("macro", macro)
+cache_df("trends", trends)
+cache_df("mobility", mobility)
+cache_df("stocks", stocks)
 
-# ---------- Routing ----------
-if page == "Command Center":
-    ui.luxe_header(
-        "Command Center",
-        "A live read on category momentum, tone, markets, and public interest — distilled for action."
-    )
+# UI
+tabs = st.tabs(["Command Center", "Categories", "Market & Mobility", "Sources & Logs"])
+with tabs[0]:
+    render_command_center(kpis, risk, news, trends, stocks, mobility, ent_df, topics)
 
-    # HUMINT layers (fail-safe)
-    with st.spinner("Computing HUMINT layers…"):
-        try:
-            ent_df = entities.extract_entities(news_df, top_n=8)
-        except Exception:
-            ent_df = pd.DataFrame(columns=["category","label","entity","count"])
-        try:
-            tension_df = riskmodel.compute_tension(news_df, heat, ent_df)
-        except Exception:
-            tension_df = pd.DataFrame(columns=[
-                "category","tension_0_100","neg_density","sent_vol","news_z",
-                "market_drawdown","trends_norm","entity_intensity"
-            ])
+with tabs[1]:
+    render_category_page(selected_cats, news, social, trends, ent_df, topics)
 
-    # ----- Alert Ribbon -----
-    data_alerts = alertsmod.collect_data_alerts(heat, news_df, tension_df)
-    external_alerts = cached_external_alerts("src/incident_sources.json") if ext_alerts_on else []
-    ui.alert_ribbon(data_alerts + external_alerts, collapsed=False, max_show=18)
+with tabs[2]:
+    c1, c2 = st.columns((1,1))
+    with c1:
+        st.subheader("Market Overview")
+        st.dataframe(stocks, use_container_width=True, hide_index=True)
+    with c2:
+        st.subheader("Mobility")
+        st.dataframe(mobility, use_container_width=True, hide_index=True)
 
-    # KPIs + Highlights
-    ui.kpi_ribbon(heat_df=heat, tension_df=tension_df, news_df=news_df)
-    ui.highlights_panel(heat, tension_df)
+with tabs[3]:
+    st.subheader("Government & Regulatory Feed")
+    st.dataframe(gov, use_container_width=True, hide_index=True)
+    st.subheader("Macro Indicators")
+    st.dataframe(macro, use_container_width=True, hide_index=True)
 
-    # Executive Summary
-    st.markdown("---")
-    st.header("Executive Summary")
-    ui.insights_summary(heat_df=heat, news_df=news_df, tension_df=tension_df, max_items=8)
-
-    # Heatmap
-    st.subheader("Category Heatmap (24–72h)")
-    ui.heatmap_labeled(heat)
-    st.caption(
-        "Interpretation: red = unusually busy news flow; blue = quieter. "
-        "Tone > 0 is supportive; market % > 0 is up. Hover for values. "
-        "Drag to zoom; double-click to reset."
-    )
-
-    # Sentiment explainer
-    ui.sentiment_explainer(heat, news_df)
-
-    st.markdown("---")
-    st.header("HUMINT Deep-Dive")
-
-    # Narratives
-    with st.spinner("Deriving narratives…"):
-        try:
-            narr = narratives.build_narratives(news_df, top_n=3)
-            narr_table = narr.table
-            top_docs_by_cat = narr.top_docs_by_cat
-        except Exception:
-            from types import SimpleNamespace
-            narr_table = pd.DataFrame(columns=["category","narrative","weight","n_docs"])
-            top_docs_by_cat = {}
-    ui.narratives_panel(narr_table, top_docs_by_cat)
-
-    # Entities
-    st.subheader("Prominent Entities (ORG / PERSON / GPE)")
-    if 'ent_df' in locals() and not ent_df.empty:
-        st.dataframe(ent_df, use_container_width=True)
-    else:
-        st.caption("No entities extracted.")
-
-    # Tension
-    ui.tension_panel(tension_df)
-
-    # Headlines
-    st.markdown("---")
-    st.header("Top Headlines by Category")
-    ui.headlines_overview(news_df)
-
-    # Glossary
-    st.markdown("---")
-    ui.glossary_panel(show_full=False)
-
-elif page == "Categories":
-    ui.luxe_header("Categories", "Drilldowns by industry vertical.")
-    cats = sorted(heat["category"].unique().tolist()) if not heat.empty else []
-    sel = st.selectbox("Choose a category", cats) if cats else None
-    if sel:
-        sub = news_df[news_df["category"] == sel].sort_values("published_dt", ascending=False)
-        st.write(f"Latest in **{sel}**")
-        st.dataframe(sub[["published_dt","source","title","link","sentiment"]].head(200), use_container_width=True)
-    else:
-        st.info("No categories available yet.")
-
-elif page == "Markets":
-    ui.luxe_header("Markets", "Five-day % change by mapped proxies; use Command Center for context.")
-    st.dataframe(
-        heat[["category","market_pct","news_count","trends","sentiment","composite"]],
-        use_container_width=True
-    )
-
-elif page == "Regions":
-    ui.luxe_header("Regions", "Regional view coming next: geospatial layers & movement tracking (Milestone 2).")
-    st.info("Regional OSINT/HUMINT and mobility layers will land in Milestone 2.")
-
-elif page == "Social":
-    ui.luxe_header("Social", "Community pulse via Reddit and trend signals (Milestone 2).")
-    st.info("Reddit HUMINT and topic velocity will land in Milestone 2.")
-
-elif page == "My Data":
-    ui.luxe_header("My Data", "Bring your own sheets/logs for private overlays.")
-    st.info("Uploads & overlays to be enabled after snapshots module (Milestone 3–4).")
-
-elif page == "Methods":
-    ui.luxe_header("Methods", "How metrics are computed.")
-    ui.glossary_panel(show_full=True)
+st.sidebar.download_button("Download News CSV", export_dataframe_csv(news), file_name="news.csv", mime="text/csv")
