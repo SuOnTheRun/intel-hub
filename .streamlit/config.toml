@@ -1,12 +1,12 @@
-[theme]
-base="light"
-primaryColor="#0B1221"
-backgroundColor="#FFFFFF"
-secondaryBackgroundColor="#F6F7FA"
-textColor="#0B1221"
-font="sans serif"
-
 [server]
 headless = true
 enableCORS = false
-maxUploadSize = 200
+enableXsrfProtection = true
+address = "0.0.0.0"
+port = 8501
+# Helps with flaky free-tier proxies on first WebSocket connect
+websocketPingTimeout = 30
+maxMessageSize = 200
+
+[client]
+toolbarMode = "viewer"
