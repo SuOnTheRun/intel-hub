@@ -505,29 +505,36 @@ class MobilityCollector:
     def collect(self) -> pd.DataFrame:
         url = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
         try:
-            df = pd.read_csv(url)
+            import requests, io
+            r = requests.get(url, timeout=8)
+            if r.status_code != 200 or not r.text:
+                return pd.DataFrame(columns=["date","throughput"])
+            df = pd.read_csv(io.StringIO(r.text))
             df = df.rename(columns={"Date":"date", "Total Traveler Throughput":"throughput"}).dropna()
             df["date"] = pd.to_datetime(df["date"])
             return df.sort_values("date", ascending=False).head(30).reset_index(drop=True)
         except Exception:
             return pd.DataFrame(columns=["date","throughput"])
 
+
 class StocksCollector:
     def collect(self, tickers: List[str]) -> pd.DataFrame:
         import yfinance as yf
-        frames = []
+        try:
+            # Bulk pull, smallest useful window to speed cold start
+            df = yf.download(tickers=tickers, period="1d", interval="1d", group_by="ticker", progress=False, threads=True)
+        except Exception:
+            return pd.DataFrame(columns=["ticker","price","change","pct","volume"])
+
+        rows = []
         for t in tickers:
             try:
-                info = yf.Ticker(t).history(period="5d")[-1:]
-                if not info.empty:
-                    last = info.iloc[0]
-                    frames.append({
-                        "ticker": t,
-                        "price": float(last["Close"]),
-                        "change": float(last["Close"] - last["Open"]),
-                        "pct": float((last["Close"] - last["Open"]) / last["Open"] * 100.0),
-                        "volume": int(last["Volume"]),
-                    })
+                sub = (df[t] if isinstance(df.columns, pd.MultiIndex) and t in df.columns.get_level_values(0) else df)
+                close = float(sub["Close"].dropna().iloc[-1])
+                open_ = float(sub["Open"].dropna().iloc[-1])
+                vol   = int(sub["Volume"].dropna().iloc[-1])
+                pct   = ((close - open_) / open_) * 100.0 if open_ else 0.0
+                rows.append({"ticker": t, "price": close, "change": close - open_, "pct": pct, "volume": vol})
             except Exception:
                 continue
-        return pd.DataFrame(frames).sort_values("pct", ascending=False).reset_index(drop=True)
+        return pd.DataFrame(rows).sort_values("pct", ascending=False).reset_index(drop=True)
