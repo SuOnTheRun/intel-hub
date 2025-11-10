@@ -39,7 +39,9 @@ MAX_ITEMS_PER_FEED      = 60
 PER_REQUEST_TIMEOUT     = 8
 DISK_CACHE_TTL_SEC      = 600  # 10 minutes
 DISK_CACHE_DIR          = "data"
-DISK_CACHE_PATH         = os.path.join(DISK_CACHE_DIR, "news_cache.json")
+# bump schema version to avoid stale cache from earlier runs
+DISK_CACHE_PATH         = os.path.join(DISK_CACHE_DIR, "news_cache_v2.json")
+
 
 # ---- UTC helpers ----
 from dateutil import parser as dtparser
