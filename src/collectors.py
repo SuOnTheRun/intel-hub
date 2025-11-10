@@ -187,6 +187,69 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
     """
     Returns DataFrame with: category, source, title, link, summary, published_dt (UTC tz-aware).
     Uses disk cache (10 min) and coverage-first planning so every category gets at least some headlines.
+    Always returns the expected schema, even when empty.
+    """
+    expected_cols = ["category", "source", "title", "link", "summary", "published_dt"]
+
+    cached = _cache_read()
+    if cached is not None and not cached.empty:
+        # Ensure schema
+        for c in expected_cols:
+            if c not in cached.columns:
+                cached[c] = pd.Series([], dtype="object")
+        return cached[expected_cols]
+
+    # Load catalog
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        catalog = {}
+
+    planned = _plan_feeds(catalog)
+
+    rows: List[Dict] = []
+    for category, url in planned:
+        for it in _fetch_feed(url):
+            rows.append({
+                "category": category,
+                "source": _domain(it.get("link", "")),
+                "title": it.get("title", ""),
+                "link": it.get("link", ""),
+                "summary": it.get("summary", ""),
+                "published_dt": it.get("published_dt", utcnow()),
+            })
+
+    df = pd.DataFrame(rows)
+
+    # If nothing fetched, still return the expected schema
+    if df.empty:
+        stale = _cache_read()
+        if stale is not None and not stale.empty:
+            for c in expected_cols:
+                if c not in stale.columns:
+                    stale[c] = pd.Series([], dtype="object")
+            return stale[expected_cols]
+        return pd.DataFrame(columns=expected_cols)
+
+    # Cleaning
+    try:
+        df["title"] = df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+        df["summary"] = df["summary"].fillna("").astype(str)
+    except Exception:
+        pass
+
+    try:
+        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(utcnow())
+    except Exception:
+        df["published_dt"] = utcnow()
+
+    df = df.sort_values("published_dt", ascending=False).reset_index(drop=True)
+    _cache_write(df)
+    return df[expected_cols]
+
+    Returns DataFrame with: category, source, title, link, summary, published_dt (UTC tz-aware).
+    Uses disk cache (10 min) and coverage-first planning so every category gets at least some headlines.
     """
     cached = _cache_read()
     if cached is not None and not cached.empty:
@@ -445,21 +508,55 @@ class GovCollector:
     def collect(self, max_items: int = 200, lookback_days: int = 7) -> pd.DataFrame:
         path = os.path.join(os.path.dirname(__file__), "..", "gov_regulatory_feeds.json")
         df = get_news_dataframe(path)
+
+        # Ensure schema even if upstream returned truly empty
+        expected_cols = ["category", "source", "title", "link", "summary", "published_dt"]
+        if df is None or df.empty:
+            return pd.DataFrame(columns=expected_cols)
+        for c in expected_cols:
+            if c not in df.columns:
+                df[c] = pd.Series([], dtype="object")
+
+        # Time filter
         if lookback_days:
-            cutoff = utcnow() - pd.Timedelta(days=lookback_days)
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
             df = df[df["published_dt"] >= cutoff]
-        return df.groupby("source", group_keys=False).head(max_items).reset_index(drop=True)
+
+        # Cap per source
+        if not df.empty:
+            df = df.sort_values("published_dt", ascending=False)
+            df = df.groupby("source", group_keys=False).head(max_items).reset_index(drop=True)
+        return df[expected_cols]
+
 
 class SocialCollector:
     def collect(self, categories: List[str], max_items: int = 120, lookback_days: int = 3) -> pd.DataFrame:
         path = os.path.join(os.path.dirname(__file__), "..", "social_sources.json")
         df = get_news_dataframe(path)
+
+        expected_cols = ["category", "source", "title", "link", "summary", "published_dt"]
+        if df is None or df.empty:
+            return pd.DataFrame(columns=expected_cols)
+        for c in expected_cols:
+            if c not in df.columns:
+                df[c] = pd.Series([], dtype="object")
+
         if categories:
             df = df[df["category"].isin(categories)]
+
         if lookback_days:
-            cutoff = utcnow() - pd.Timedelta(days=lookback_days)
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
             df = df[df["published_dt"] >= cutoff]
-        return df.groupby("category", group_keys=False).head(max_items).reset_index(drop=True)
+
+        if not df.empty:
+            df = (
+                df.sort_values("published_dt", ascending=False)
+                  .groupby("category", group_keys=False)
+                  .head(max_items)
+                  .reset_index(drop=True)
+            )
+        return df[expected_cols]
+
 
 class MacroCollector:
     def collect(self, lookback_days: int = 7) -> pd.DataFrame:
