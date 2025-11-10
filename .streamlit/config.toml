@@ -4,8 +4,7 @@ enableCORS = false
 enableXsrfProtection = true
 address = "0.0.0.0"
 port = 8501
-# Helps with flaky free-tier proxies on first WebSocket connect
-websocketPingTimeout = 30
+websocketPingTimeout = 60
 maxMessageSize = 200
 
 [client]
