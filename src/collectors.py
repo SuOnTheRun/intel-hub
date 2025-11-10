@@ -393,12 +393,33 @@ from .data_sources import news_catalog, gov_catalog, social_catalog
 
 class NewsCollector:
     def collect(self, categories: List[str], max_items: int = 100, lookback_days: int = 3) -> pd.DataFrame:
-        df = get_news_dataframe(os.path.join(os.path.dirname(__file__), "..", "news_rss_catalog.json"))
-        if not df.empty and categories:
+        path = os.path.join(os.path.dirname(__file__), "..", "news_rss_catalog.json")
+        df = get_news_dataframe(path)
+
+        # If empty or None, return a clean frame with the expected columns
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["category","source","title","link","summary","published_dt"])
+
+        # Ensure published_dt exists even if a stale cache/schema is read
+        if "published_dt" not in df.columns:
+            if "published" in df.columns:
+                df["published_dt"] = pd.to_datetime(df["published"], utc=True, errors="coerce")
+            elif "date" in df.columns:
+                df["published_dt"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
+            else:
+                df["published_dt"] = pd.NaT
+            df["published_dt"] = df["published_dt"].fillna(pd.Timestamp.now(tz="UTC"))
+
+        # Filter by selected categories (if any)
+        if categories:
             df = df[df["category"].isin(categories)]
+
+        # Time filter
         if lookback_days:
-            cutoff = utcnow() - pd.Timedelta(days=lookback_days)
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
             df = df[df["published_dt"] >= cutoff]
+
+        # Cap roughly per category and order newest-first
         if not df.empty:
             df = (
                 df.sort_values("published_dt", ascending=False)
@@ -406,6 +427,8 @@ class NewsCollector:
                   .head(max_items)
                   .reset_index(drop=True)
             )
+        return df
+
         return df
 
 class GovCollector:
