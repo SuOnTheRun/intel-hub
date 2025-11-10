@@ -1,40 +1,49 @@
+# app.py — Intelligence Hub — US (safe boot, lazy load, exec-ready)
+
 import os
 import pandas as pd
 import streamlit as st
 
-from src.collectors import NewsCollector, GovCollector, MacroCollector, TrendsCollector, MobilityCollector, StocksCollector, SocialCollector
-from src.analytics import aggregate_category_metrics, build_kpi_cards, category_market_trends_table
-from src.emotions import score_sentiment_batch
-from src.entities import extract_entities_batch
-from src.narratives import cluster_topics
-from src.theming import inject_css
-from src.exporters import export_dataframe_csv
-from src.risk_model import compute_risk_index
-from src.ui_us import render_command_center, render_category_page, render_sources_sidebar
-from src.store import cache_df
+from src.theming import inject_css if 'theming' in __import__('pkgutil').iter_modules(['src']) else (lambda: None)
 
-st.set_page_config(page_title="Intelligence Hub — US", page_icon=None, layout="wide")
+# Required collectors (already hardened in src/collectors.py)
+from src.collectors import (
+    NewsCollector, GovCollector, SocialCollector,
+    MacroCollector, TrendsCollector, MobilityCollector, StocksCollector
+)
+# Optional analytics (must fail-soft if missing)
+try:
+    from src.analytics import aggregate_category_metrics, compute_risk_index
+except Exception:
+    def aggregate_category_metrics(*_a, **_k): return pd.DataFrame()
+    def compute_risk_index(*_a, **_k): return pd.DataFrame(columns=["category","tension_index"])
+
+st.set_page_config(page_title="Intelligence Hub — US", layout="wide")
 inject_css()
 
-st.sidebar.title("Intelligence Hub — US")
-categories = ["Macro", "Technology", "Consumer", "Energy", "Healthcare", "Finance", "Retail", "Autos"]
-selected_cats = st.sidebar.multiselect("Categories", categories, default=["Macro","Technology","Consumer"])
+# --------------- Sidebar ---------------
+st.sidebar.header("Intelligence Hub — US")
+cats_all = ["Macro", "Technology", "Consumer", "Energy", "Healthcare", "Finance", "Retail", "Autos"]
+selected_cats = st.sidebar.multiselect("Categories", cats_all, default=["Macro", "Technology", "Consumer"])
 lookback_days = st.sidebar.slider("Lookback (days)", 1, 14, 3)
-max_items = st.sidebar.slider("Max stories per source", 20, 200, 80, step=10)
-st.sidebar.markdown("---")
-with st.sidebar.expander("Sources"):
-    render_sources_sidebar()
-st.sidebar.markdown("---")
-st.sidebar.caption("All data from public/free sources. Updated on load.")
-# Render a skeleton immediately so the server binds before slow network calls
-st.sidebar.success("Service healthy — loading live data in the background.")
+max_items = st.sidebar.slider("Max stories per source", 20, 200, 80)
+st.sidebar.caption("All data from public/free sources. Updated on demand.")
 
-# Lightweight placeholder (so first paint is fast)
-ph_cmd, ph_cat, ph_market = st.empty(), st.empty(), st.empty()
-ph_cmd.info("Initializing Command Center…")
+SAFE_BOOT = os.environ.get("SAFE_BOOT", "0") == "1"
 
-# Strict, safe wrapper for all collectors (never crash the process)
-errors = []
+# --------------- Controls ---------------
+colA, colB, colC = st.columns([1,1,4])
+with colA:
+    go = st.button("Load / Refresh", type="primary", use_container_width=True)
+with colB:
+    clear = st.button("Clear Cache", use_container_width=True)
+
+if clear:
+    st.cache_data.clear()
+    st.success("Cache cleared.")
+
+# --------------- Diagnostics bucket ---------------
+errors: list[str] = []
 def safe(fn, *a, **k):
     try:
         return fn(*a, **k)
@@ -42,59 +51,103 @@ def safe(fn, *a, **k):
         errors.append(f"{fn.__name__}: {e}")
         return pd.DataFrame()
 
-# Collect
-with st.spinner("Collecting live signals..."):
-    news = NewsCollector().collect(selected_cats, max_items=max_items, lookback_days=lookback_days)
-    gov = GovCollector().collect(max_items=120, lookback_days=lookback_days)
-    social = SocialCollector().collect(selected_cats, max_items=120, lookback_days=lookback_days)
-    macro = MacroCollector().collect(lookback_days=lookback_days)
-    trends = TrendsCollector().collect(selected_cats, lookback_days=30)
-    mobility = MobilityCollector().collect()
-    stocks = StocksCollector().collect(["^GSPC","^IXIC","^DJI","AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA"])
-    cat_mt = category_market_trends_table(lookback_days=7)  # << new robust signals
+# --------------- Cached wrappers ---------------
+@st.cache_data(ttl=600, show_spinner=False)
+def _news(cats, max_items, lookback_days):
+    return NewsCollector().collect(cats, max_items=max_items, lookback_days=lookback_days)
 
-# Sentiment & Entities
-all_text = pd.concat([news["title"], social["title"].fillna("")], axis=0).astype(str).tolist()
-sent_df = score_sentiment_batch(all_text)
-ent_df = extract_entities_batch(all_text)
+@st.cache_data(ttl=600, show_spinner=False)
+def _gov(max_items, lookback_days):
+    return GovCollector().collect(max_items=max_items, lookback_days=lookback_days)
 
-# Narratives
-topics = cluster_topics(pd.DataFrame({"text": all_text}))
+@st.cache_data(ttl=600, show_spinner=False)
+def _social(cats, max_items, lookback_days):
+    return SocialCollector().collect(cats, max_items=max_items, lookback_days=lookback_days)
 
-# Merge per-item sentiment back into tables
-news = news.copy()
-news["sentiment"] = score_sentiment_batch(news["title"].astype(str))["compound"].values
-social["sentiment"] = score_sentiment_batch(social["title"].astype(str))["compound"].values
+@st.cache_data(ttl=600, show_spinner=False)
+def _macro(lookback_days):
+    return MacroCollector().collect(lookback_days=lookback_days)
 
-# Aggregates & Risk
-kpis = aggregate_category_metrics(news, social, trends, stocks)
-risk = compute_risk_index(news, social, trends, stocks)
+@st.cache_data(ttl=600, show_spinner=False)
+def _trends(cats):
+    return TrendsCollector().collect(cats, lookback_days=30)
 
-# Persist snapshots
-cache_df("news", news); cache_df("gov", gov); cache_df("social", social)
-cache_df("macro", macro); cache_df("trends", trends); cache_df("mobility", mobility); cache_df("stocks", stocks)
+@st.cache_data(ttl=600, show_spinner=False)
+def _mobility():
+    return MobilityCollector().collect()
 
-# UI
-tabs = st.tabs(["Command Center", "Categories", "Market & Mobility", "Sources & Logs"])
-with tabs[0]:
-    render_command_center(kpis, risk, news, trends, stocks, mobility, ent_df, topics, cat_mt)
+@st.cache_data(ttl=600, show_spinner=False)
+def _stocks():
+    # Lightweight daily pulse – safe on free tier
+    tickers = ["^GSPC","^IXIC","^DJI","AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA"]
+    return StocksCollector().collect(tickers)
 
-with tabs[1]:
-    render_category_page(selected_cats, news, social, trends, ent_df, topics)
+# --------------- First paint: always immediate ---------------
+st.info("Service healthy. Click **Load / Refresh** to pull live signals.", icon=None)
 
-with tabs[2]:
-    c1, c2 = st.columns((1,1))
+if SAFE_BOOT and not go:
+    st.warning("SAFE_BOOT is enabled — collectors are idle. Set SAFE_BOOT=0 to enable data.")
+    st.stop()
+
+if not go and not SAFE_BOOT:
+    st.stop()
+
+# --------------- Live pull (guarded) ---------------
+with st.spinner("Collecting live signals…"):
+    news    = safe(_news, selected_cats, max_items, lookback_days)
+    gov     = safe(_gov, 120, lookback_days)
+    social  = safe(_social, selected_cats, 120, lookback_days)
+    macro   = safe(_macro, lookback_days)
+    trends  = safe(_trends, selected_cats)
+    mobility= safe(_mobility)
+    stocks  = safe(_stocks)
+
+# --------------- KPI & Risk (guarded) ---------------
+try:
+    kpis = aggregate_category_metrics(news, social, trends, stocks)
+except Exception as e:
+    errors.append(f"aggregate_category_metrics: {e}")
+    kpis = pd.DataFrame()
+
+try:
+    risk = compute_risk_index(news, social, trends, stocks)
+except Exception as e:
+    errors.append(f"compute_risk_index: {e}")
+    risk = pd.DataFrame(columns=["category","tension_index"])
+
+# --------------- Layout ---------------
+t1, t2 = st.tabs(["Command Center", "Feeds"])
+
+with t1:
+    c1, c2 = st.columns([2,1])
     with c1:
-        st.subheader("Market Overview")
-        st.dataframe(stocks, use_container_width=True, hide_index=True)
+        st.subheader("Market & Macro Pulse")
+        if not stocks.empty:
+            st.dataframe(stocks, use_container_width=True, height=280)
+        if not macro.empty:
+            st.line_chart(macro.set_index("timestamp").iloc[:, :5], height=240)
+
     with c2:
+        st.subheader("Risk Index")
+        if not risk.empty:
+            st.dataframe(risk, use_container_width=True, height=240)
         st.subheader("Mobility")
-        st.dataframe(mobility, use_container_width=True, hide_index=True)
+        if not mobility.empty:
+            st.bar_chart(mobility.set_index("date")["throughput"].sort_index(), height=240)
 
-with tabs[3]:
-    st.subheader("Government & Regulatory Feed")
-    st.dataframe(gov, use_container_width=True, hide_index=True)
-    st.subheader("Macro Indicators")
-    st.dataframe(macro, use_container_width=True, hide_index=True)
+with t2:
+    st.subheader("Government / Regulatory")
+    if not gov.empty:
+        st.dataframe(gov[["published_dt","source","title"]].head(200), use_container_width=True, height=320)
+    st.subheader("News")
+    if not news.empty:
+        st.dataframe(news[["published_dt","category","source","title"]].head(300), use_container_width=True, height=420)
+    st.subheader("Social / Community")
+    if not social.empty:
+        st.dataframe(social[["published_dt","category","source","title"]].head(300), use_container_width=True, height=420)
 
-st.sidebar.download_button("Download News CSV", export_dataframe_csv(news), file_name="news.csv", mime="text/csv")
+# Diagnostics (if anything failed)
+if errors:
+    st.markdown("#### Diagnostics")
+    for e in errors:
+        st.code(e)
