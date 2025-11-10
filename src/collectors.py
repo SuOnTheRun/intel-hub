@@ -470,24 +470,39 @@ class MobilityCollector:
 
 class StocksCollector:
     def collect(self, tickers: List[str]) -> pd.DataFrame:
+        cols = ["ticker", "price", "change", "pct", "volume"]
         try:
             import yfinance as yf  # type: ignore
         except Exception:
-            return pd.DataFrame(columns=["ticker","price","change","pct","volume"])
-        try:
-            df = yf.download(tickers=tickers, period="1d", interval="1d",
-                             group_by="ticker", progress=False, threads=True)
-        except Exception:
-            return pd.DataFrame(columns=["ticker","price","change","pct","volume"])
-        rows = []
+            return pd.DataFrame(columns=cols)
+
+        rows: List[dict] = []
         for t in tickers:
             try:
-                sub = (df[t] if isinstance(df.columns, pd.MultiIndex) and t in df.columns.get_level_values(0) else df)
-                close = float(sub["Close"].dropna().iloc[-1])
-                open_ = float(sub["Open"].dropna().iloc[-1])
-                vol   = int(sub["Volume"].dropna().iloc[-1])
-                pct   = ((close - open_) / open_) * 100.0 if open_ else 0.0
-                rows.append({"ticker": t, "price": close, "change": close - open_, "pct": pct, "volume": vol})
+                # Per-ticker fetch is more resilient than bulk when some tickers fail.
+                tk = yf.Ticker(t)
+                hist = tk.history(period="1d", interval="1d", auto_adjust=False)
+                if hist is None or hist.empty:
+                    continue
+
+                close = float(hist["Close"].dropna().iloc[-1])
+                open_ = float(hist["Open"].dropna().iloc[-1]) if "Open" in hist and not hist["Open"].dropna().empty else 0.0
+                vol   = int(hist["Volume"].dropna().iloc[-1]) if "Volume" in hist and not hist["Volume"].dropna().empty else 0
+                pct   = ((close - open_) / open_ * 100.0) if open_ else 0.0
+
+                rows.append({
+                    "ticker": t,
+                    "price": close,
+                    "change": close - open_,
+                    "pct": pct,
+                    "volume": vol
+                })
             except Exception:
+                # Swallow per-ticker failures and keep going
                 continue
-        return pd.DataFrame(rows).sort_values("pct", ascending=False).reset_index(drop=True)
+
+        df = pd.DataFrame(rows, columns=cols)
+        if df.empty:
+            return pd.DataFrame(columns=cols)  # stable schema, no crash
+
+        return df.sort_values("pct", ascending=False).reset_index(drop=True)
