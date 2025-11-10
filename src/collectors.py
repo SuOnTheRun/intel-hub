@@ -188,7 +188,9 @@ def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
     """
     Returns DataFrame with: category, source, title, link, summary, published_dt (UTC tz-aware).
     Always returns the expected schema, even if empty.
+    
     """
+
     expected_cols = ["category", "source", "title", "link", "summary", "published_dt"]
 
     cached = _cache_read()
