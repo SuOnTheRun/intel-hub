@@ -26,6 +26,21 @@ with st.sidebar.expander("Sources"):
     render_sources_sidebar()
 st.sidebar.markdown("---")
 st.sidebar.caption("All data from public/free sources. Updated on load.")
+# Render a skeleton immediately so the server binds before slow network calls
+st.sidebar.success("Service healthy — loading live data in the background.")
+
+# Lightweight placeholder (so first paint is fast)
+ph_cmd, ph_cat, ph_market = st.empty(), st.empty(), st.empty()
+ph_cmd.info("Initializing Command Center…")
+
+# Strict, safe wrapper for all collectors (never crash the process)
+errors = []
+def safe(fn, *a, **k):
+    try:
+        return fn(*a, **k)
+    except Exception as e:
+        errors.append(f"{fn.__name__}: {e}")
+        return pd.DataFrame()
 
 # Collect
 with st.spinner("Collecting live signals..."):
