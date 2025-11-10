@@ -39,8 +39,9 @@ MAX_ITEMS_PER_FEED      = 60
 PER_REQUEST_TIMEOUT     = 8
 DISK_CACHE_TTL_SEC      = 600  # 10 minutes
 DISK_CACHE_DIR          = "data"
-# bump schema version to avoid stale cache from earlier runs
-DISK_CACHE_PATH         = os.path.join(DISK_CACHE_DIR, "news_cache_v2.json")
+# Bump schema version again to avoid any older cache files
+DISK_CACHE_PATH         = os.path.join(DISK_CACHE_DIR, "news_cache_v3.json")
+
 
 
 # ---- UTC helpers ----
@@ -100,10 +101,18 @@ def _cache_read() -> pd.DataFrame | None:
         if not rows:
             return None
         df = pd.DataFrame(rows)
-        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(utcnow())
+
+        # Accept only caches that already have published_dt
+        if "published_dt" not in df.columns:
+            return None
+
+        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(
+            pd.Timestamp.now(tz="UTC")
+        )
         return df.sort_values("published_dt", ascending=False).reset_index(drop=True)
     except Exception:
         return None
+
 
 # -----------------------------
 # Helpers
@@ -396,21 +405,23 @@ class NewsCollector:
         path = os.path.join(os.path.dirname(__file__), "..", "news_rss_catalog.json")
         df = get_news_dataframe(path)
 
-        # If empty or None, return a clean frame with the expected columns
+        # If empty, return clean schema
         if df is None or df.empty:
             return pd.DataFrame(columns=["category","source","title","link","summary","published_dt"])
 
-        # Ensure published_dt exists even if a stale cache/schema is read
+        # Ensure published_dt exists (guard against any malformed source)
         if "published_dt" not in df.columns:
-            if "published" in df.columns:
-                df["published_dt"] = pd.to_datetime(df["published"], utc=True, errors="coerce")
-            elif "date" in df.columns:
-                df["published_dt"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
-            else:
-                df["published_dt"] = pd.NaT
-            df["published_dt"] = df["published_dt"].fillna(pd.Timestamp.now(tz="UTC"))
+            # Try common alternates, else fill with now()
+            ts = None
+            for alt in ("published", "date", "pubDate", "updated"):
+                if alt in df.columns:
+                    ts = pd.to_datetime(df[alt], utc=True, errors="coerce")
+                    break
+            if ts is None:
+                ts = pd.Series(pd.NaT, index=df.index)
+            df["published_dt"] = ts.fillna(pd.Timestamp.now(tz="UTC"))
 
-        # Filter by selected categories (if any)
+        # Filter by selected categories (if given)
         if categories:
             df = df[df["category"].isin(categories)]
 
@@ -419,7 +430,7 @@ class NewsCollector:
             cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
             df = df[df["published_dt"] >= cutoff]
 
-        # Cap roughly per category and order newest-first
+        # Cap per category and order newest-first
         if not df.empty:
             df = (
                 df.sort_values("published_dt", ascending=False)
@@ -429,7 +440,6 @@ class NewsCollector:
             )
         return df
 
-        return df
 
 class GovCollector:
     def collect(self, max_items: int = 200, lookback_days: int = 7) -> pd.DataFrame:
