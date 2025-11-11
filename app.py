@@ -114,7 +114,7 @@ tasks = {
     "macro":    lambda: cached_macro(lookback_days),
     "trends":   lambda: cached_trends(selected_cats, max(7, lookback_days)),
     "mobility": lambda: cached_mobility(),
-    "stocks":   lambda: cached_stocks(["^NDX", "AAPL", "NVDA", "AMZN", "TSLA", "MSFT"]),
+    "stocks":   lambda: cached_stocks(["AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA"]),
 }
 results: Dict[str, Any] = {k: None for k in tasks}
 
