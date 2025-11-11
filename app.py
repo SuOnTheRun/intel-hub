@@ -19,6 +19,15 @@ st.set_page_config(
     layout="wide",
 )
 
+# Fail-fast guard: never let import-time errors kill the process
+try:
+    import pandas as pd  # light
+except Exception:
+    import streamlit as st
+    st.write("Boot error: pandas not available")
+    raise
+
+
 # ---------- Optional theming hook (safe if theming.py absent) ----------
 def inject_css() -> None:
     """No-op unless src/theming.py is present with inject_css()."""
