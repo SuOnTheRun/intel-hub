@@ -495,23 +495,20 @@ class MobilityCollector:
         url = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
         try:
             import requests, io
-            r = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0"})
+            r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code != 200 or not r.text:
                 return pd.DataFrame(columns=["date","throughput"])
             df = pd.read_csv(io.StringIO(r.text))
-            # Handle known header variants
-            if "Date" in df.columns and "Total Traveler Throughput" in df.columns:
+            if "Date" in df.columns:
                 df = df.rename(columns={"Date": "date", "Total Traveler Throughput": "throughput"})
-            elif "date" in df.columns and "throughput" in df.columns:
+            elif "date" in df.columns:
                 pass
             else:
                 return pd.DataFrame(columns=["date","throughput"])
-            df = df.dropna(subset=["date", "throughput"])
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            df = df.dropna(subset=["date"])
             df["throughput"] = pd.to_numeric(df["throughput"], errors="coerce")
-            df = df.dropna(subset=["throughput"])
-            return df.sort_values("date", ascending=False).head(30).reset_index(drop=True)
+            df = df.dropna().sort_values("date", ascending=False)
+            return df.head(30).reset_index(drop=True)
         except Exception:
             return pd.DataFrame(columns=["date","throughput"])
 
@@ -563,4 +560,39 @@ class GovRegCollector:
         return (df.sort_values("published_dt", ascending=False)
                   .head(max_items)
                   .reset_index(drop=True))
+
+class MacroTrendsCollector:
+    def collect(self) -> pd.DataFrame:
+        from pytrends.request import TrendReq
+        pytrends = TrendReq(hl="en-US", tz=360)
+        kw_list = ["inflation", "interest rates", "unemployment", "consumer confidence"]
+        try:
+            pytrends.build_payload(kw_list, cat=0, timeframe="now 7-d", geo="US")
+            df = pytrends.interest_over_time()
+            if df.empty:
+                return pd.DataFrame(columns=["date","inflation","interest rates","unemployment","consumer confidence"])
+            df = df.reset_index().rename(columns={"date": "Date"})
+            return df.tail(30)
+        except Exception:
+            return pd.DataFrame(columns=["Date"] + kw_list)
+
+class CategoryTrendsCollector:
+    def collect(self, categories: List[str]) -> pd.DataFrame:
+        from pytrends.request import TrendReq
+        pytrends = TrendReq(hl="en-US", tz=360)
+        df_all = []
+        for c in categories:
+            try:
+                pytrends.build_payload([c], cat=0, timeframe="now 7-d", geo="US")
+                df = pytrends.interest_over_time().reset_index()
+                if not df.empty:
+                    df["category"] = c
+                    df_all.append(df[["date", c, "category"]])
+            except Exception:
+                continue
+        if not df_all:
+            return pd.DataFrame(columns=["date","category","value"])
+        df = pd.concat(df_all)
+        df = df.rename(columns={df.columns[1]: "value"})
+        return df
 
