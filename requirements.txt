@@ -1,29 +1,22 @@
-streamlit==1.38.0
+# Core
+streamlit==1.39.0
 pandas==2.2.2
 numpy==1.26.4
-feedparser==6.0.11
-aiohttp==3.9.5
-beautifulsoup4==4.12.3
-lxml==5.3.0
-python-dateutil==2.9.0.post0
-pydantic==2.8.2
-nltk==3.9.1
-scikit-learn==1.5.2
-spacy==3.7.4
-# IMPORTANT: install spaCy model via wheel URL (works on Render)
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
-yfinance==0.2.43
-pytrends==4.9.2
 requests==2.32.3
-diskcache==5.6.3
-altair==5.4.1
-plotly==5.24.1
-yfinance==0.2.44
-streamlit>=1.39
-pandas>=2.1
-requests>=2.32
-feedparser>=6.0
-python-dateutil>=2.9
+feedparser==6.0.11
+python-dateutil==2.9.0.post0
 yfinance==0.2.44
 pytrends==4.9.2
 fredapi==0.5.2
+
+# NLP (optional)
+spacy==3.7.4
+pydantic==1.10.15      # spaCy 3.7 requires pydantic < 2
+thinc==8.2.3           # pulled by spaCy; pin keeps resolver happy
+catalogue==2.0.10      # spaCy dep pin to avoid resolution noise
+nltk==3.9.1
+scikit-learn==1.5.2
+beautifulsoup4==4.12.3
+lxml==5.3.0
+# spaCy small English model (works with spaCy 3.7.x)
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
