@@ -1,171 +1,131 @@
 {
-  "Consumer Staples": [
-    "https://news.google.com/rss/search?q=FMCG+OR+%22consumer+staples%22+OR+%22packaged+food%22+OR+%22household+products%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=%22food+prices%22+OR+%22inflation+basket%22+OR+%22staples+demand%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+FMCG+OR+%22consumer+staples%22+OR+%22packaged+food%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:ft.com+%22consumer+goods%22+OR+%22household+products%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:thehindu.com+FMCG+OR+%22consumer+goods%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:livemint.com+FMCG+OR+%22consumer+goods%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.fooddive.com/feeds/news/",
-    "https://www.thegrocer.co.uk/feeds/rss",
-    "https://www.packagingnews.com/feed"
+  "Macro": [
+    "https://news.google.com/rss/search?q=inflation%20OR%20%22interest%20rates%22%20OR%20%22consumer%20spending%22%20OR%20%22yield%20curve%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=%22jobs%20report%22%20OR%20unemployment%20OR%20%22retail%20sales%22%20OR%20CPI%20OR%20PCE%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/markets/us/rss",
+    "https://www.wsj.com/xml/rss/3_7031.xml",
+    "https://www.ft.com/companies/us?format=rss"
   ],
-  "Energy": [
-    "https://news.google.com/rss/search?q=oil+OR+gas+OR+OPEC+OR+LNG+OR+%22crude+prices%22+OR+refinery+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=%22renewable+energy%22+OR+solar+OR+wind+OR+hydrogen+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+oil+OR+gas+OR+OPEC+OR+energy+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:dw.com+energy+OR+%22coal%22+OR+%22renewable%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:aljazeera.com+energy+OR+OPEC+OR+oil+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.spglobal.com/commodityinsights/en/market-insights/rss",
-    "https://oilprice.com/rss/main",
-    "https://www.eia.gov/rss/todayinenergy.xml",
-    "https://www.reuters.com/business/energy/rss"
-  ],
+
   "Technology": [
-    "http://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://news.google.com/rss/search?q=AI+OR+%22artificial+intelligence%22+OR+semiconductor+OR+chip+OR+cloud+OR+SaaS+OR+cybersecurity+OR+data+centers+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:ft.com+technology+OR+semiconductor+OR+AI+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:techcrunch.com+AI+OR+cloud+OR+enterprise+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:arstechnica.com+AI+OR+security+OR+%22chip%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=AI%20OR%20%22artificial%20intelligence%22%20OR%20semiconductor%20OR%20%22data%20center%22%20OR%20cloud%20OR%20cybersecurity%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=site:reuters.com%20technology%20OR%20semiconductor%20OR%20AI%20when:7d&hl=en-US&gl=US&ceid=US:en",
     "https://www.theverge.com/rss/index.xml",
     "https://feeds.arstechnica.com/arstechnica/index",
-    "https://www.wired.com/feed/rss",
     "https://www.technologyreview.com/feed/",
-    "https://www.reuters.com/technology/rss",
+    "https://www.wired.com/feed/rss",
     "https://www.ft.com/technology?format=rss",
     "https://techcrunch.com/feed/"
   ],
-  "Automotive": [
-    "https://news.google.com/rss/search?q=automotive+OR+EV+OR+%22electric+vehicle%22+OR+battery+OR+autonomous+OR+hydrogen+car+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+auto+OR+EV+OR+car+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:bbc.com+%22electric+vehicle%22+OR+automotive+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:ft.com+automotive+OR+EV+OR+battery+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:electrek.co+%22electric+vehicle%22+OR+EV+OR+battery+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.autonews.com/rss",
+
+  "Consumer": [
+    "https://news.google.com/rss/search?q=%22consumer%20spending%22%20OR%20retail%20OR%20%22loyalty%20program%22%20OR%20subscription%20OR%20%22discount%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=site:reuters.com%20retail%20OR%20%22consumer%20spending%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.retaildive.com/feeds/news/",
+    "https://www.modernretail.co/feed/",
+    "https://www.cnbc.com/id/10000115/device/rss/rss.html"
+  ],
+
+  "Energy": [
+    "https://news.google.com/rss/search?q=oil%20OR%20gas%20OR%20OPEC%20OR%20LNG%20OR%20%22crude%20prices%22%20OR%20refinery%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=%22renewable%20energy%22%20OR%20solar%20OR%20wind%20OR%20hydrogen%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/business/energy/rss",
+    "https://oilprice.com/rss/main",
+    "https://www.eia.gov/rss/todayinenergy.xml",
+    "https://www.spglobal.com/commodityinsights/en/market-insights/rss"
+  ],
+
+  "Autos": [
+    "https://news.google.com/rss/search?q=automotive%20OR%20EV%20OR%20%22electric%20vehicle%22%20OR%20battery%20OR%20autonomous%20car%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=site:reuters.com%20auto%20OR%20EV%20OR%20car%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/business/autos-transportation/rss",
     "https://insideevs.com/feed/",
-    "https://www.motortrend.com/feed/",
-    "https://www.caranddriver.com/rss/all.xml",
-    "https://www.reuters.com/business/autos-transportation/rss"
+    "https://www.autonews.com/rss",
+    "https://www.caranddriver.com/rss/all.xml"
   ],
-  "Financials": [
-    "https://news.google.com/rss/search?q=banking+OR+fintech+OR+payments+OR+NBFC+OR+lending+OR+insurance+OR+microfinance+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=RBI+OR+%22monetary+policy%22+OR+repo+rate+OR+yield+curve+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+bank+OR+finance+OR+fintech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:cnbc.com+bank+OR+markets+OR+fintech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:livemint.com+bank+OR+NBFC+OR+fintech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+
+  "Finance": [
+    "https://news.google.com/rss/search?q=banking%20OR%20fintech%20OR%20payments%20OR%20lending%20OR%20insurance%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=%22Federal%20Reserve%22%20OR%20%22monetary%20policy%22%20OR%20%22yield%20curve%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/finance/rss",
+    "https://www.wsj.com/xml/rss/3_7031.xml",
     "https://www.ft.com/companies/financials?format=rss",
-    "https://www.reuters.com/finance/rss"
+    "https://www.cnbc.com/id/10000664/device/rss/rss.html"
   ],
+
   "Media & Advertising": [
-    "https://news.google.com/rss/search?q=advertising+OR+adtech+OR+%22media+spend%22+OR+CTV+OR+programmatic+OR+OOH+OR+retail+media+OR+martech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:campaignasia.com+advertising+OR+adtech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:adage.com+advertising+OR+CTV+OR+programmatic+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:adweek.com+advertising+OR+marketing+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:exchange4media.com+advertising+OR+adtech+OR+OOH+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=advertising%20OR%20adtech%20OR%20%22media%20spend%22%20OR%20CTV%20OR%20programmatic%20OR%20OOH%20OR%20%22retail%20media%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=site:adage.com%20advertising%20OR%20CTV%20OR%20programmatic%20when:7d&hl=en-US&gl=US&ceid=US:en",
     "https://www.adweek.com/category/marketing/feed/",
     "https://www.thedrum.com/rss",
     "https://digiday.com/feed/"
   ],
+
   "Healthcare": [
-    "https://news.google.com/rss/search?q=healthcare+OR+pharma+OR+biotech+OR+vaccine+OR+FDA+OR+clinical+trial+OR+hospital+infrastructure+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+health+OR+pharma+OR+biotech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:statnews.com+pharma+OR+biotech+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:who.int+news+OR+outbreak+OR+guidance+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:nature.com+health+OR+medicine+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=healthcare%20OR%20pharma%20OR%20biotech%20OR%20vaccine%20OR%20FDA%20OR%20%22clinical%20trial%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=site:reuters.com%20health%20OR%20pharma%20OR%20biotech%20when:7d&hl=en-US&gl=US&ceid=US:en",
     "https://www.fiercebiotech.com/rss/xml",
     "https://www.fiercepharma.com/rss/xml",
     "https://www.statnews.com/feed/"
   ],
+
   "Telecom": [
-    "https://news.google.com/rss/search?q=telecom+OR+5G+OR+6G+OR+mobile+networks+OR+fiber+OR+broadband+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+telecom+OR+5G+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:ettelecom.com+5G+OR+telecom+OR+spectrum+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:bbc.com+telecom+OR+connectivity+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=telecom%20OR%205G%20OR%206G%20OR%20%22fiber%20broadband%22%20OR%20spectrum%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=site:reuters.com%205G%20OR%20telecom%20when:7d&hl=en-US&gl=US&ceid=US:en",
     "https://www.lightreading.com/rss_simple.asp",
     "https://www.telecomtv.com/rss"
   ],
+
   "Retail & E-commerce": [
-    "https://news.google.com/rss/search?q=ecommerce+OR+retail+OR+%22consumer+spending%22+OR+D2C+OR+marketplace+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+retail+OR+ecommerce+OR+shopping+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:businessoffashion.com+retail+OR+ecommerce+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:techcrunch.com+commerce+OR+delivery+OR+retail+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=ecommerce%20OR%20retail%20OR%20%22consumer%20spending%22%20OR%20D2C%20OR%20marketplace%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=site:reuters.com%20retail%20OR%20ecommerce%20OR%20shopping%20when:7d&hl=en-US&gl=US&ceid=US:en",
     "https://www.retaildive.com/feeds/news/",
-    "https://www.modernretail.co/feed/",
-    "https://www.retailtouchpoints.com/feed"
+    "https://www.retailtouchpoints.com/feed",
+    "https://www.businessoffashion.com/feed/"
   ],
+
   "Defense & Security": [
-    "https://news.google.com/rss/search?q=defense+OR+military+OR+%22national+security%22+OR+geopolitics+OR+war+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:defensenews.com+defense+OR+military+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:bbc.com+military+OR+defense+OR+conflict+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+security+OR+conflict+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://news.google.com/rss/search?q=defense%20OR%20military%20OR%20%22national%20security%22%20OR%20geopolitics%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/world/us/rss",
     "https://breakingdefense.com/feed/",
     "https://www.thedrive.com/the-war-zone/rss",
     "https://www.navalnews.com/feed/"
   ],
+
   "Real Estate": [
-    "https://news.google.com/rss/search?q=%22real+estate%22+OR+property+OR+housing+OR+REIT+OR+construction+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+real+estate+OR+housing+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:livemint.com+real+estate+OR+property+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:moneycontrol.com+real+estate+OR+housing+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=%22real%20estate%22%20OR%20property%20OR%20housing%20OR%20REIT%20OR%20construction%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/markets/companies/real-estate/rss",
     "https://therealdeal.com/feed/",
     "https://www.housingwire.com/feed/",
     "https://www.bisnow.com/rss"
   ],
+
   "Metals & Mining": [
-    "https://news.google.com/rss/search?q=metals+OR+mining+OR+steel+OR+copper+OR+aluminium+OR+coal+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+mining+OR+metals+OR+commodities+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:ft.com+commodities+OR+metals+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=metals%20OR%20mining%20OR%20steel%20OR%20copper%20OR%20aluminum%20when:7d&hl=en-US&gl=US&ceid=US:en",
     "https://www.mining.com/feed/",
-    "https://www.kitco.com/news/index.rss"
+    "https://www.kitco.com/news/index.rss",
+    "https://www.ft.com/commodities?format=rss"
   ],
+
   "Agriculture": [
-    "https://news.google.com/rss/search?q=agriculture+OR+%22crop+output%22+OR+fertilizer+OR+%22food+grain%22+OR+monsoon+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+agriculture+OR+farming+OR+crop+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:faonewsroom.org+agriculture+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.thecattlesite.com/rss/news/",
-    "https://www.agweb.com/rss/all"
+    "https://news.google.com/rss/search?q=agriculture%20OR%20%22crop%20output%22%20OR%20fertilizer%20OR%20%22food%20grain%22%20OR%20harvest%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/markets/commodities/rss",
+    "https://www.agweb.com/rss/all",
+    "https://www.thecattlesite.com/rss/news/"
   ],
+
   "Climate & ESG": [
-    "https://news.google.com/rss/search?q=climate+change+OR+ESG+OR+sustainability+OR+carbon+emission+OR+%22net+zero%22+OR+renewable+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:reuters.com+climate+OR+sustainability+OR+ESG+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:bbc.com+climate+OR+environment+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://news.google.com/rss/search?q=site:dw.com+climate+OR+ESG+OR+carbon+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=%22climate%20change%22%20OR%20ESG%20OR%20sustainability%20OR%20%22carbon%20emissions%22%20OR%20%22net%20zero%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+    "https://www.reuters.com/business/sustainable-business/rss",
     "https://www.economist.com/climate-change/rss",
     "https://www.carbonbrief.org/feed/"
   ],
+
   "Cross-category / Wires": [
-    "https://www.reuters.com/world/rss",
-    "https://www.ft.com/?format=rss",
+    "https://www.reuters.com/world/us/rss",
     "https://apnews.com/hub/ap-top-news?utm_source=apfeed&format=rss",
     "https://feeds.bbci.co.uk/news/rss.xml",
-    "https://www.aljazeera.com/xml/rss/all.xml",
     "https://www.dw.com/en/rss",
     "https://www.economist.com/latest/rss"
-  ],
-  "Crypto & Blockchain": [
-    "https://news.google.com/rss/search?q=crypto+OR+bitcoin+OR+ethereum+OR+blockchain+OR+defi+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
-    "https://www.theblock.co/rss.xml"
-  ],
-  "Industrials & Logistics": [
-    "https://news.google.com/rss/search?q=logistics+OR+%22supply+chain%22+OR+shipping+OR+freight+OR+warehousing+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.supplychaindive.com/feeds/news/",
-    "https://www.freightwaves.com/feed",
-    "https://www.joc.com/rss"
-  ],
-  "Travel & Hotels": [
-    "https://news.google.com/rss/search?q=travel+industry+OR+aviation+OR+airlines+OR+hotels+OR+tourism+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://skift.com/feed/",
-    "https://www.travelweekly.com/rss",
-    "https://hotelnewsnow.com/RSS/AllArticles",
-    "https://www.reuters.com/business/airlines/rss"
-  ],
-  "Luxury Goods": [
-    "https://news.google.com/rss/search?q=luxury+goods+OR+premium+brands+OR+%22watch+industry%22+OR+handbags+OR+%22high+fashion%22+when:2d&hl=en-IN&gl=IN&ceid=IN:en",
-    "https://www.businessoffashion.com/feed/",
-    "https://www.voguebusiness.com/rss",
-    "https://jingdaily.com/feed/"
   ]
 }
