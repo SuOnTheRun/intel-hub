@@ -451,103 +451,149 @@ class SocialCollector:
 
 class MacroCollector:
     def collect(self, lookback_days: int = 7) -> pd.DataFrame:
-        # Lightweight macro pulse via pytrends; FRED handled by collect_us_fred()
         if TrendReq is None:
             return pd.DataFrame(columns=["timestamp"])
-        pytrends = TrendReq(hl="en-US", tz=360)
-        kw = ["inflation","recession","unemployment","interest rates","housing market"]
+        kw = ["inflation", "recession", "unemployment", "interest rates", "housing"]
+        # pytrends can 429/timeout. Retry small groups.
         try:
-            pytrends.build_payload(kw_list=kw, timeframe=f"now {max(1, lookback_days)}-d", geo="US")
-            df = pytrends.interest_over_time().reset_index().rename(columns={"date":"timestamp"})
-            return df
+            pytrends = TrendReq(hl="en-US", tz=360, timeout=(3, 7), retries=2, backoff_factor=0.2)
         except Exception:
             return pd.DataFrame(columns=["timestamp"])
+        rows = []
+        start = (_NAIVE_NOW - timedelta(days=max(lookback_days, 7))).strftime("%Y-%m-%d")
+        timeframe = f"{start} {_NAIVE_NOW.strftime('%Y-%m-%d')}"
+        for group in (kw[i:i+3] for i in range(0, len(kw), 3)):
+            try:
+                pytrends.build_payload(group, cat=0, timeframe=timeframe, geo="US")
+                df = pytrends.interest_over_time()
+                if df is None or df.empty:
+                    continue
+                df = df.reset_index().rename(columns={"date": "timestamp"})
+                # melt to a tidy frame
+                m = df.melt(id_vars=["timestamp"], var_name="series", value_name="value")
+                m["timestamp"] = pd.to_datetime(m["timestamp"], utc=True)
+                rows.append(m[["timestamp", "series", "value"]])
+            except Exception:
+                continue
+        if not rows:
+            return pd.DataFrame(columns=["timestamp", "series", "value"])
+        out = pd.concat(rows, ignore_index=True).sort_values("timestamp")
+        return out
 
 class TrendsCollector:
     def collect(self, categories: List[str], lookback_days: int = 30) -> pd.DataFrame:
         if TrendReq is None:
-            return pd.DataFrame(columns=["timestamp","category"])
-        pytrends = TrendReq(hl="en-US", tz=360)
+            return pd.DataFrame(columns=["timestamp"])
         cat2kw = {
-            "Technology": ["AI","semiconductor","cloud computing","cybersecurity"],
-            "Consumer": ["consumer spending","loyalty program","subscription","discount"],
-            "Energy": ["oil price","gasoline price","renewable energy"],
-            "Healthcare": ["drug approval","FDA recall","telemedicine"],
-            "Finance": ["bank earnings","credit card delinquency","ETF"],
-            "Retail": ["foot traffic","omnichannel","same-day delivery"],
-            "Autos": ["EV sales","hybrid car","dealer inventory"],
-            "Macro": ["inflation","interest rates","housing market"],
+            "Technology": ["AI", "semiconductor", "cloud computing", "cybersecurity"],
+            "Consumer":   ["coupon", "discount", "loyalty program", "subscription"],
+            "Energy":     ["oil price", "gasoline price", "renewable energy"],
+            "Healthcare": ["drug approval", "telemedicine", "FDA recall"],
+            "Finance":    ["credit card", "ETF", "mortgage rate"],
+            "Retail":     ["foot traffic", "omnichannel", "same-day delivery"],
+            "Autos":      ["EV sales", "hybrid car", "dealer inventory"],
+            "Macro":      ["inflation", "interest rates", "housing market"],
         }
-        kw: List[str] = []
+        want = []
         for c in categories:
-            kw += cat2kw.get(c, [])
-        kw = list(dict.fromkeys(kw))[:5] or ["macro"]
+            want += cat2kw.get(c, [])
+        want = list(dict.fromkeys(want))[:8] or ["macro"]
+
         try:
-            pytrends.build_payload(kw_list=kw, timeframe=f"now {lookback_days}-d", geo="US")
-            df = pytrends.interest_over_time().reset_index().rename(columns={"date":"timestamp"})
-            df["category"] = " / ".join(categories) if categories else "All"
-            return df
+            pytrends = TrendReq(hl="en-US", tz=360, timeout=(3, 7), retries=2, backoff_factor=0.2)
         except Exception:
-            return pd.DataFrame(columns=["timestamp","category"])
+            return pd.DataFrame(columns=["timestamp","category","term","interest"])
+
+        rows = []
+        start = (_NAIVE_NOW - timedelta(days=max(lookback_days, 14))).strftime("%Y-%m-%d")
+        timeframe = f"{start} {_NAIVE_NOW.strftime('%Y-%m-%d')}"
+        for grp in (want[i:i+5] for i in range(0, len(want), 5)):
+            try:
+                pytrends.build_payload(grp, cat=0, timeframe=timeframe, geo="US")
+                df = pytrends.interest_over_time()
+                if df is None or df.empty:
+                    continue
+                df = df.reset_index().rename(columns={"date": "timestamp"})
+                for g in grp:
+                    if g in df.columns:
+                        part = df[["timestamp", g]].rename(columns={g: "interest"})
+                        part["term"] = g
+                        rows.append(part)
+            except Exception:
+                continue
+        if not rows:
+            return pd.DataFrame(columns=["timestamp","category","term","interest"])
+        out = pd.concat(rows, ignore_index=True)
+        out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True)
+        out["category"]  = " / ".join(categories) if categories else "All"
+        return out.sort_values("timestamp")
+
 
 class MobilityCollector:
     def collect(self) -> pd.DataFrame:
         url = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
         try:
-            import requests, io
-            r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            r = requests.get(url, timeout=10)
             if r.status_code != 200 or not r.text:
+                return pd.DataFrame(columns=["date", "throughput"])
+            # Some days this CSV changes delimiter/headers slightly; be lenient.
+            import io
+            df = pd.read_csv(io.StringIO(r.text), sep=None, engine="python")
+            # Try common header variants
+            col_date = next((c for c in df.columns if str(c).strip().lower() in ("date","datum")), None)
+            col_val  = next((c for c in df.columns if "total" in str(c).lower() and "throughput" in str(c).lower()), None)
+            if not col_date or not col_val:
                 return pd.DataFrame(columns=["date","throughput"])
-            df = pd.read_csv(io.StringIO(r.text))
-            if "Date" in df.columns:
-                df = df.rename(columns={"Date": "date", "Total Traveler Throughput": "throughput"})
-            elif "date" in df.columns:
-                pass
-            else:
-                return pd.DataFrame(columns=["date","throughput"])
+            df = df.rename(columns={col_date: "date", col_val: "throughput"}).dropna(subset=["date","throughput"])
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"])
             df["throughput"] = pd.to_numeric(df["throughput"], errors="coerce")
-            df = df.dropna().sort_values("date", ascending=False)
-            return df.head(30).reset_index(drop=True)
+            df = df.dropna(subset=["throughput"])
+            return df.sort_values("date", ascending=False).head(30).reset_index(drop=True)
         except Exception:
             return pd.DataFrame(columns=["date","throughput"])
 
 class StocksCollector:
     def collect(self, tickers: List[str]) -> pd.DataFrame:
-        cols = ["ticker", "price", "change", "pct", "volume"]
+        import yfinance as yf
+        rows = []
+
+        # First try a bulk call (fast when it works)
         try:
-            import yfinance as yf  # type: ignore
+            bulk = yf.download(
+                tickers=tickers,
+                period="5d", interval="1d",
+                group_by="ticker", progress=False, threads=True
+            )
         except Exception:
-            return pd.DataFrame(columns=cols)
+            bulk = None
 
-        rows: List[dict] = []
         for t in tickers:
+            close = open_ = vol = None
+            # Attempt to read from bulk first
             try:
-                tk = yf.Ticker(t)
-                hist = tk.history(period="1d", interval="1d", auto_adjust=False)
-                if hist is None or hist.empty:
-                    continue
-
-                close = float(hist["Close"].dropna().iloc[-1])
-                open_ = float(hist["Open"].dropna().iloc[-1]) if "Open" in hist and not hist["Open"].dropna().empty else 0.0
-                vol   = int(hist["Volume"].dropna().iloc[-1]) if "Volume" in hist and not hist["Volume"].dropna().empty else 0
-                pct   = ((close - open_) / open_ * 100.0) if open_ else 0.0
-
-                rows.append({
-                    "ticker": t,
-                    "price": close,
-                    "change": close - open_,
-                    "pct": pct,
-                    "volume": vol
-                })
+                if isinstance(bulk, pd.DataFrame):
+                    sub = (bulk[t] if isinstance(bulk.columns, pd.MultiIndex) and t in bulk.columns.get_level_values(0) else bulk)
+                    if "Close" in sub.columns and "Open" in sub.columns:
+                        close = float(sub["Close"].dropna().iloc[-1])
+                        open_ = float(sub["Open"].dropna().iloc[-1])
+                        vol   = float(sub.get("Volume", pd.Series([0])).dropna().iloc[-1])
             except Exception:
-                continue
-
-        df = pd.DataFrame(rows, columns=cols)
-        if df.empty or "pct" not in df.columns:
-            return pd.DataFrame(columns=cols)
-
-        return df.sort_values("pct", ascending=False).reset_index(drop=True)
+                pass
+            # If bulk failed for this ticker, do a single fetch
+            if close is None or open_ is None:
+                try:
+                    h = yf.Ticker(t).history(period="5d", interval="1d")
+                    close = float(h["Close"].dropna().iloc[-1])
+                    open_ = float(h["Open"].dropna().iloc[-1])
+                    vol   = float(h.get("Volume", pd.Series([0])).dropna().iloc[-1])
+                except Exception:
+                    continue
+            pct = ((close - open_) / open_) * 100.0 if open_ else 0.0
+            rows.append({"ticker": t, "price": close, "change": close - open_, "pct": pct, "volume": int(vol or 0)})
+        if not rows:
+            return pd.DataFrame(columns=["ticker","price","change","pct","volume"])
+        return pd.DataFrame(rows).sort_values("pct", ascending=False).reset_index(drop=True)
 
 class GovRegCollector:
     def collect(self, max_items: int = 50, lookback_days: int = 14) -> pd.DataFrame:
