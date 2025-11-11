@@ -140,6 +140,11 @@ kpi_cols[3].metric("Mobility rows (TSA)", int(len(mobility_df)))
 kpi_cols[4].metric("Tracked tickers", int(len(stocks_df)))
 
 st.divider()
+# Right after st.markdown("## Command Center")
+st.markdown("## Command Center")
+if st.button("↻ Retry data pulls", type="secondary"):
+    st.cache_data.clear()  # clear cached None results
+    st.experimental_rerun()
 
 # ----- News & Gov -----
 col1, col2 = st.columns([2, 1])
