@@ -155,6 +155,31 @@ if st.button("↻ Retry data pulls", type="secondary"):
     st.cache_data.clear()  # clear cached None results
     st.experimental_rerun()
 
+# ---------- Layout ----------
+st.markdown("## Command Center")
+
+# ✅ Add this block right below the line above:
+# ----------------------------------------------------
+if "boot_stage" not in st.session_state:
+    st.session_state.boot_stage = 0
+
+# Add a quick Retry button
+if st.button("↻ Retry data pulls", type="secondary"):
+    st.cache_data.clear()            # clear old cached results
+    st.session_state.boot_stage = 1  # allow full data fetch next run
+    st.experimental_rerun()
+
+# On the very first render, paint only the fast section (NEWS)
+run_heavy = st.session_state.boot_stage >= 1
+# Automatically advance to full mode after first paint
+if st.session_state.boot_stage == 0:
+    st.session_state.boot_stage = 1
+    st.experimental_rerun()
+# ----------------------------------------------------
+
+kpi_cols = st.columns(5)
+kpi_cols[0].metric("News items (filtered)", int(len(news_df)))
+
 # ----- News & Gov -----
 col1, col2 = st.columns([2, 1])
 
