@@ -1,18 +1,8 @@
 {
-  "Federal Reserve": [
-    "https://www.federalreserve.gov/feeds/press_all.xml"
-  ],
-  "SEC": [
-    "https://www.sec.gov/news/pressreleases.rss"
-  ],
-  "FTC": [
-    "https://www.ftc.gov/news-events/news/rss.xml"
-  ],
-  "US Dept. of Labor": [
-    "https://www.dol.gov/newsroom/releases/feed"
-  ],
-  "BLS": [
-    "https://www.bls.gov/feeds/news_release.htm"
-  ]
+  "Federal Reserve": ["https://www.federalreserve.gov/feeds/press_all.xml"],
+  "SEC": ["https://www.sec.gov/news/pressreleases.rss"],
+  "FTC": ["https://www.ftc.gov/news-events/news/rss.xml"],
+  "US Dept. of Labor": ["https://www.dol.gov/newsroom/releases/feed"],
+  "BLS": ["https://www.bls.gov/feeds/news_release.htm"],
+  "White House": ["https://www.whitehouse.gov/briefing-room/feed/"]
 }
-
