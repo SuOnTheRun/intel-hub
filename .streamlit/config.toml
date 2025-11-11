@@ -1,14 +1,10 @@
 [server]
 headless = true
-enableCORS = false
-enableXsrfProtection = false
-# give the websocket more time before the proxy decides it's dead
-websocketPingTimeout = 120
-# avoid re-executing on every file change in Render
-runOnSave = false
-
+port = 8501
+address = "0.0.0.0"
+maxUploadSize = 15
+fileWatcherType = "none"        # lowers boot cost on Render
 [client]
-toolbarMode = "viewer"
-
+showErrorDetails = false
 [theme]
-base = "light"
+base="light"
