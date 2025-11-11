@@ -479,7 +479,6 @@ class StocksCollector:
         rows: List[dict] = []
         for t in tickers:
             try:
-                # Per-ticker fetch is more resilient than bulk when some tickers fail.
                 tk = yf.Ticker(t)
                 hist = tk.history(period="1d", interval="1d", auto_adjust=False)
                 if hist is None or hist.empty:
@@ -498,11 +497,10 @@ class StocksCollector:
                     "volume": vol
                 })
             except Exception:
-                # Swallow per-ticker failures and keep going
                 continue
 
         df = pd.DataFrame(rows, columns=cols)
-        if df.empty:
-            return pd.DataFrame(columns=cols)  # stable schema, no crash
+        if df.empty or "pct" not in df.columns:
+            return pd.DataFrame(columns=cols)
 
         return df.sort_values("pct", ascending=False).reset_index(drop=True)
