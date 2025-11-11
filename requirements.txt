@@ -19,3 +19,11 @@ diskcache==5.6.3
 altair==5.4.1
 plotly==5.24.1
 yfinance==0.2.44
+streamlit>=1.39
+pandas>=2.1
+requests>=2.32
+feedparser>=6.0
+python-dateutil>=2.9
+yfinance==0.2.44
+pytrends==4.9.2
+fredapi==0.5.2
