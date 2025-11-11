@@ -50,6 +50,99 @@ def cached_stocks(tickers):
 # src/app.py — Intelligence Hub (US) minimal stable app
 from __future__ import annotations
 
+left, right = st.columns([1,4])
+
+# --- Sidebar controls (unchanged) ---
+with left:
+    st.markdown("### Intelligence Hub — US")
+    cats = st.multiselect("Categories", ["Macro","Technology","Consumer"], default=["Macro","Technology","Consumer"])
+    lookback = st.slider("Lookback (days)", 1, 14, 3)
+    max_per_source = st.slider("Max stories per source", 20, 200, 80)
+    st.selectbox("Sources", [" "], index=0)
+
+with right:
+    st.header("Command Center")
+    placeholder = st.empty()
+    st.caption("External, free sources only. Timestamps are UTC.")
+
+    # 1) Always render fast with NEWS first
+    news_df = cached_news(cats, max_items=max_per_source, lookback_days=lookback)
+    kpi_cols = st.columns(5)
+    kpi_cols[0].metric("News items (filtered)", len(news_df) if not news_df.empty else 0)
+
+    # paint the table immediately
+    st.subheader("Latest Headlines")
+    if news_df.empty:
+        st.info("No headlines returned for the current lookback. Try increasing the lookback window.")
+    else:
+        st.dataframe(news_df[["published_dt","category","source","title"]].head(25), use_container_width=True, hide_index=True)
+
+    # 2) Kick off the heavier collectors in parallel with strict timeouts
+    tasks = {
+        "gov": lambda: cached_gov(50, lookback),
+        "macro": lambda: cached_macro(),
+        "cat": lambda: cached_category_trends(cats),
+        "tsa": lambda: cached_mobility(),
+        "stocks": lambda: cached_stocks(["^NDX","NVDA","AAPL","MSFT"])
+    }
+
+    results = {k: None for k in tasks}
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        fut_map = {ex.submit(tasks[k]): k for k in tasks}
+        start = time.time()
+        for fut in as_completed(fut_map, timeout=20):  # hard wall so proxy never 502s
+            k = fut_map[fut]
+            try:
+                results[k] = fut.result()
+            except Exception:
+                results[k] = None
+            if time.time() - start > 20:
+                break
+
+    # 3) Render each panel defensively
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Gov / Regulatory")
+        gov = results["gov"]
+        if gov is None or getattr(gov, "empty", True):
+            st.info("No recent regulator/government items for the selected window.")
+        else:
+            st.dataframe(gov[["published_dt","source","title"]].head(15), use_container_width=True, hide_index=True)
+
+    with col2:
+        st.subheader("Macro pulse (Google Trends)")
+        macro = results["macro"]
+        if macro is None or getattr(macro, "empty", True):
+            st.info("Macro pulse unavailable right now.")
+        else:
+            st.line_chart(macro.set_index(macro.columns[0]).drop(columns=[c for c in macro.columns if c.lower() in ("ispartial","category")]), height=220)
+
+    col3, col4 = st.columns(2)
+    with col3:
+        st.subheader("Category trends (Google Trends)")
+        catdf = results["cat"]
+        if catdf is None or getattr(catdf, "empty", True):
+            st.info("No category trends for selection.")
+        else:
+            piv = catdf.pivot_table(index="date", columns="category", values="value", aggfunc="mean")
+            st.line_chart(piv, height=220)
+
+    with col4:
+        st.subheader("Mobility — TSA throughput (last 30)")
+        tsa = results["tsa"]
+        if tsa is None or getattr(tsa, "empty", True):
+            st.info("TSA dataset unavailable right now.")
+        else:
+            st.line_chart(tsa.set_index("date")["throughput"], height=220)
+
+    st.subheader("Market snapshot")
+    stocks = results["stocks"]
+    if stocks is None or getattr(stocks, "empty", True):
+        st.info("Stock quotes unavailable.")
+    else:
+        st.dataframe(stocks, use_container_width=True, hide_index=True)
+
 import os
 import pandas as pd
 import streamlit as st
