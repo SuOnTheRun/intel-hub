@@ -551,3 +551,16 @@ class StocksCollector:
             return pd.DataFrame(columns=cols)
 
         return df.sort_values("pct", ascending=False).reset_index(drop=True)
+
+class GovRegCollector:
+    def collect(self, max_items: int = 50, lookback_days: int = 14) -> pd.DataFrame:
+        path = os.path.join(os.path.dirname(__file__), "..", "gov_regulatory_feeds.json")
+        df = get_news_dataframe(path)
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["source","title","link","published_dt"])
+        cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
+        df = df[df["published_dt"] >= cutoff]
+        return (df.sort_values("published_dt", ascending=False)
+                  .head(max_items)
+                  .reset_index(drop=True))
+
