@@ -364,21 +364,58 @@ def collect_us_fred() -> pd.DataFrame:
 # Class-based collectors used by app.py
 # ============================================================
 class NewsCollector:
+    _fallback_terms = {
+        "Macro": ["inflation", "interest rates", "consumer spending"],
+        "Technology": ["AI", "semiconductor", "data center", "cloud"],
+        "Consumer": ["retail sales", "qsr", "loyalty program"],
+        "Energy": ["oil price", "LNG", "renewable"],
+        "Healthcare": ["FDA", "drug approval", "biotech"],
+        "Finance": ["bank earnings", "credit card", "ETF"],
+        "Retail": ["ecommerce", "omnichannel", "foot traffic"],
+        "Autos": ["EV sales", "hybrid", "dealer inventory"]
+    }
+
     def collect(self, categories: List[str], max_items: int = 100, lookback_days: int = 3) -> pd.DataFrame:
         path = os.path.join(os.path.dirname(__file__), "..", "news_rss_catalog.json")
         df = get_news_dataframe(path)
-        if df.empty:
-            return pd.DataFrame(columns=["category","source","title","link","summary","published_dt"])
+
+        expected = ["category","source","title","link","summary","published_dt"]
+        if df is None or df.empty:
+            df = pd.DataFrame(columns=expected)
+
+        # Filter by categories if provided
         if categories:
             df = df[df["category"].isin(categories)]
-        cutoff = utcnow() - pd.Timedelta(days=int(lookback_days))
-        df = df[df["published_dt"] >= cutoff]
+
+        # Time filter
+        if lookback_days:
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
+            if "published_dt" in df.columns:
+                df = df[df["published_dt"] >= cutoff]
+
+        # If still empty, fallback to Google News search for those categories
+        if df.empty and categories:
+            from .collectors import collect_us_google_news  # reuse existing function
+            terms = []
+            for c in categories:
+                terms += self._fallback_terms.get(c, [c])
+            g = collect_us_google_news(categories=terms, max_items=max_items)
+            if not g.empty:
+                # Normalize to expected schema
+                g = g.rename(columns={"published": "published_dt"})
+                g["category"] = categories[0] if len(categories) == 1 else "Search"
+                g["source"] = g.get("source", "")
+                g["summary"] = g.get("summary", "")
+                g["published_dt"] = pd.to_datetime(g["published_dt"], utc=True, errors="coerce").fillna(pd.Timestamp.now(tz="UTC"))
+                df = g[["category","source","title","link","summary","published_dt"]]
+
         if not df.empty:
             df = (df.sort_values("published_dt", ascending=False)
                     .groupby("category", group_keys=False)
-                    .head(int(max_items))
+                    .head(max_items)
                     .reset_index(drop=True))
-        return df
+        return df[expected] if set(expected).issubset(df.columns) else df
+
 
 class GovCollector:
     def collect(self, max_items: int = 200, lookback_days: int = 7) -> pd.DataFrame:
@@ -457,13 +494,23 @@ class MobilityCollector:
     def collect(self) -> pd.DataFrame:
         url = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
         try:
-            r = requests.get(url, timeout=8)
+            import requests, io
+            r = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code != 200 or not r.text:
                 return pd.DataFrame(columns=["date","throughput"])
-            df = pd.read_csv(io.StringIO(r.text)).rename(
-                columns={"Date":"date","Total Traveler Throughput":"throughput"}
-            ).dropna()
-            df["date"] = pd.to_datetime(df["date"])
+            df = pd.read_csv(io.StringIO(r.text))
+            # Handle known header variants
+            if "Date" in df.columns and "Total Traveler Throughput" in df.columns:
+                df = df.rename(columns={"Date": "date", "Total Traveler Throughput": "throughput"})
+            elif "date" in df.columns and "throughput" in df.columns:
+                pass
+            else:
+                return pd.DataFrame(columns=["date","throughput"])
+            df = df.dropna(subset=["date", "throughput"])
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"])
+            df["throughput"] = pd.to_numeric(df["throughput"], errors="coerce")
+            df = df.dropna(subset=["throughput"])
             return df.sort_values("date", ascending=False).head(30).reset_index(drop=True)
         except Exception:
             return pd.DataFrame(columns=["date","throughput"])
