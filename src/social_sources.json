@@ -1,18 +1,16 @@
 {
-  "reddit": {
-    "score_threshold": 500,
-    "time_filter": "day",
-    "subs": {
-      "Technology": ["technology", "programming", "MachineLearning", "ArtificialIntelligence"],
-      "Markets_and_Finance": ["wallstreetbets", "stocks", "investing", "securityanalysis"],
-      "Defense_and_Security": ["worldnews", "europe", "CombatFootage"],
-      "Automotive": ["cars", "electricvehicles", "teslamotors"],
-      "Luxury_and_Fashion": ["watches", "handbags", "malefashionadvice", "femalefashionadvice"],
-      "Regional": ["singapore", "AskSingapore", "india", "IndiaInvestments", "europe", "UnitedKingdom", "china", "China_irl"]
-    }
-  },
-  "hackernews": {
-    "top": true,
-    "max_items": 60
-  }
+  "Technology": [
+    "https://hnrss.org/frontpage",
+    "https://www.reddit.com/r/technology/.rss"
+  ],
+  "Finance": [
+    "https://www.reddit.com/r/investing/.rss",
+    "https://www.reddit.com/r/stocks/.rss"
+  ],
+  "Consumer": [
+    "https://www.reddit.com/r/ConsumerAdvice/.rss"
+  ],
+  "Macro": [
+    "https://www.reddit.com/r/economy/.rss"
+  ]
 }
