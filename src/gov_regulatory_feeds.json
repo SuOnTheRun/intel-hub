@@ -1,23 +1,18 @@
 {
-  "Central Banks": {
-    "Federal Reserve": "https://www.federalreserve.gov/feeds/speeches.xml",
-    "ECB": "https://www.ecb.europa.eu/rss/press.html",
-    "Bank of England": "https://www.bankofengland.co.uk/news/rss",
-    "RBI": "https://www.rbi.org.in/Shared/Scripts/NewsRSS.ashx"
-  },
-  "Policy & Regulation": {
-    "US Commerce Dept": "https://www.commerce.gov/news/rss.xml",
-    "European Commission": "https://ec.europa.eu/commission/presscorner/rss",
-    "WTO": "https://www.wto.org/english/news_e/news_e.rss",
-    "UK Gov Press": "https://www.gov.uk/government/announcements.atom"
-  },
-  "Macro Calendars (scrape/API)": {
-    "Trading Economics": "https://api.tradingeconomics.com/calendar",
-    "Investing.com": "https://www.investing.com/economic-calendar/",
-    "Forex Factory": "https://www.forexfactory.com/calendar"
-  },
-  "Earnings & Filings": {
-    "Yahoo Finance Earnings (yfinance)": "yfinance",
-    "SEC 8-K": "https://www.sec.gov/rss/rssfeed.rss"
-  }
+  "Federal Reserve": [
+    "https://www.federalreserve.gov/feeds/press_all.xml"
+  ],
+  "SEC": [
+    "https://www.sec.gov/news/pressreleases.rss"
+  ],
+  "FTC": [
+    "https://www.ftc.gov/news-events/news/rss.xml"
+  ],
+  "US Dept. of Labor": [
+    "https://www.dol.gov/newsroom/releases/feed"
+  ],
+  "BLS": [
+    "https://www.bls.gov/feeds/news_release.htm"
+  ]
 }
+
