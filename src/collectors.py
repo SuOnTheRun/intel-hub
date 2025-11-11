@@ -554,46 +554,43 @@ class MobilityCollector:
             return pd.DataFrame(columns=["date","throughput"])
 
 class StocksCollector:
-    def collect(self, tickers: List[str]) -> pd.DataFrame:
+    """Fetch a compact snapshot of key tickers with fallback to single calls."""
+
+    def collect(self, tickers: list[str]) -> pd.DataFrame:
         import yfinance as yf
-        rows = []
+        import time
 
-        # First try a bulk call (fast when it works)
-        try:
-            bulk = yf.download(
-                tickers=tickers,
-                period="5d", interval="1d",
-                group_by="ticker", progress=False, threads=True
-            )
-        except Exception:
-            bulk = None
-
+        results = []
         for t in tickers:
-            close = open_ = vol = None
-            # Attempt to read from bulk first
             try:
-                if isinstance(bulk, pd.DataFrame):
-                    sub = (bulk[t] if isinstance(bulk.columns, pd.MultiIndex) and t in bulk.columns.get_level_values(0) else bulk)
-                    if "Close" in sub.columns and "Open" in sub.columns:
-                        close = float(sub["Close"].dropna().iloc[-1])
-                        open_ = float(sub["Open"].dropna().iloc[-1])
-                        vol   = float(sub.get("Volume", pd.Series([0])).dropna().iloc[-1])
-            except Exception:
-                pass
-            # If bulk failed for this ticker, do a single fetch
-            if close is None or open_ is None:
-                try:
-                    h = yf.Ticker(t).history(period="5d", interval="1d")
-                    close = float(h["Close"].dropna().iloc[-1])
-                    open_ = float(h["Open"].dropna().iloc[-1])
-                    vol   = float(h.get("Volume", pd.Series([0])).dropna().iloc[-1])
-                except Exception:
+                data = yf.Ticker(t).history(period="5d", interval="1d")
+                if data is None or data.empty:
+                    # Wait a bit and retry once
+                    time.sleep(1.0)
+                    data = yf.Ticker(t).history(period="5d", interval="1d")
+                if data is None or data.empty:
+                    print(f"[warn] No data for {t}")
                     continue
-            pct = ((close - open_) / open_) * 100.0 if open_ else 0.0
-            rows.append({"ticker": t, "price": close, "change": close - open_, "pct": pct, "volume": int(vol or 0)})
-        if not rows:
-            return pd.DataFrame(columns=["ticker","price","change","pct","volume"])
-        return pd.DataFrame(rows).sort_values("pct", ascending=False).reset_index(drop=True)
+
+                last = data.iloc[-1]
+                price = float(last["Close"])
+                open_ = float(last["Open"])
+                change = price - open_
+                pct = (change / open_) * 100.0 if open_ else 0.0
+                vol = float(last.get("Volume", 0))
+
+                results.append(
+                    {"ticker": t, "price": price, "change": change, "pct": pct, "volume": vol}
+                )
+            except Exception as e:
+                print(f"[error] {t}: {e}")
+                continue
+
+        if not results:
+            return pd.DataFrame(columns=["ticker", "price", "change", "pct", "volume"])
+
+        df = pd.DataFrame(results)
+        return df.sort_values("pct", ascending=False).reset_index(drop=True)
 
 class GovRegCollector:
     def collect(self, max_items: int = 50, lookback_days: int = 14) -> pd.DataFrame:
