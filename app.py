@@ -72,7 +72,11 @@ mobility_df = MobilityCollector().collect()
 
 # Example stock tickers — you can change these in code later
 ticker_list = ["^NDX", "AAPL", "NVDA", "AMZN", "TSLA", "MSFT"]
-stocks_df = StocksCollector().collect(tickers=ticker_list)
+try:
+    stocks_df = StocksCollector().collect(tickers=ticker_list)
+except Exception:
+    stocks_df = pd.DataFrame(columns=["ticker", "price", "change", "pct", "volume"])
+
 
 # -----------------------
 # Layout
