@@ -1,3 +1,52 @@
+import streamlit as st
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import wraps
+import time
+
+st.set_page_config(page_title="Intelligence Hub — US", layout="wide")
+
+def safe(fn, fallback):
+    @wraps(fn)
+    def _inner(*a, **k):
+        try:
+            return fn(*a, **k)
+        except Exception:
+            return fallback
+    return _inner
+
+# 10-min cache across restarts to beat cold starts
+@st.cache_data(ttl=600)
+def cached_news(categories, max_items, lookback_days):
+    from src.collectors import NewsCollector
+    return NewsCollector().collect(categories, max_items=max_items, lookback_days=lookback_days)
+
+@st.cache_data(ttl=600)
+def cached_gov(max_items, lookback_days):
+    # Match the class name you actually have (GovCollector or GovRegCollector)
+    from src.collectors import GovCollector as _Gov
+    return _Gov().collect(max_items=max_items, lookback_days=lookback_days)
+
+@st.cache_data(ttl=600)
+def cached_macro():
+    from src.collectors import MacroTrendsCollector as _M
+    return _M().collect()
+
+@st.cache_data(ttl=600)
+def cached_category_trends(categories):
+    from src.collectors import CategoryTrendsCollector as _C
+    return _C().collect(categories)
+
+@st.cache_data(ttl=600)
+def cached_mobility():
+    from src.collectors import MobilityCollector as _Mob
+    return _Mob().collect()
+
+@st.cache_data(ttl=600)
+def cached_stocks(tickers):
+    from src.collectors import StocksCollector as _S
+    return _S().collect(tickers)
+
+
 # src/app.py — Intelligence Hub (US) minimal stable app
 from __future__ import annotations
 
