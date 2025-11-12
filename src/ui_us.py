@@ -15,6 +15,7 @@ from .narratives import strategic_brief
 def render():
     set_dark_theme()
     st.title("United States — Intelligence Command Center")
+    st.write("")  # subtle spacer to separate the title from the first card row
     st.caption("Live OSINT / HUMINT | Situational Awareness & Early Warning")
 
     # === DATA PULLS (shielded) ===
