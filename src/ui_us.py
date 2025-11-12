@@ -91,13 +91,21 @@ def render():
 
     # MIDDLE: Markets, Mobility, GDELT Tone
     with mid:
-        hlabel("Macro Pulse", badge="Markets")
-        if not market_hist.empty:
-            st.line_chart(market_hist[["S&P 500","Nasdaq 100"]].dropna(), use_container_width=True, height=180)
-            mom = market_momentum(market_hist)
-            st.caption(f"20-day momentum — S&P 500: {mom.get('S&P 500',0):+.2f}% | Nasdaq 100: {mom.get('Nasdaq 100',0):+.2f}%")
-        else:
-            st.info("Awaiting market history.")
+            hlabel("Macro Pulse", badge="Markets")
+    if not market_hist.empty:
+        st.line_chart(market_hist[["S&P 500","Nasdaq 100"]].dropna(), use_container_width=True, height=180)
+        mom = market_momentum(market_hist)
+        st.caption(f"20-day momentum — S&P 500: {mom.get('S&P 500',0):+.2f}% | Nasdaq 100: {mom.get('Nasdaq 100',0):+.2f}%")
+
+        # ▼ ADD THIS EXPANDER RIGHT HERE ▼
+        with st.expander("How this is calculated — Momentum"):
+            from .methodology import method_note
+            st.markdown(method_note("market_momentum"))
+        # ▲ END INSERT ▲
+
+    else:
+        st.info("Awaiting market history.")
+
 
         hlabel("Mobility — TSA Throughput (7-day avg)", badge="Activity")
         if not tsa_df.empty:
@@ -106,17 +114,25 @@ def render():
         else:
             st.info("TSA data unavailable right now.")
 
-        hlabel("News Tone (GDELT GKG)", badge="Narratives")
-        gkg = frames["gkg"]
-        if not gkg.empty:
-            tone_series = gkg.set_index("datetime")["tone"].resample("3H").mean().dropna().tail(120)
-            if not tone_series.empty:
-                st.line_chart(tone_series, use_container_width=True, height=160)
-                st.caption(f"Mean tone (last 48h): {tone_series.mean():+.2f}")
-            else:
-                st.info("Insufficient points for tone trend.")
+            hlabel("News Tone (GDELT GKG)", badge="Narratives")
+    gkg = frames["gkg"]
+    if not gkg.empty:
+        tone_series = gkg.set_index("datetime")["tone"].resample("3H").mean().dropna().tail(120)
+        if not tone_series.empty:
+            st.line_chart(tone_series, use_container_width=True, height=160)
+            st.caption(f"Mean tone (last 48h): {tone_series.mean():+.2f}")
+
+            # ▼ ADD THIS EXPANDER RIGHT HERE ▼
+            with st.expander("How this is calculated — GDELT Tone"):
+                from .methodology import method_note
+                st.markdown(method_note("gdelt_tone"))
+            # ▲ END INSERT ▲
+
         else:
-            st.info("GDELT feed empty at the moment.")
+            st.info("Insufficient points for tone trend.")
+    else:
+        st.info("GDELT feed empty at the moment.")
+
 
     # RIGHT: Strategic Brief + FEMA
     with right:
