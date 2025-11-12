@@ -26,6 +26,9 @@ a:hover {text-decoration: underline;}
 .badge {display:inline-block; font-size:.72rem; padding:.2rem .45rem; border-radius:999px; background:rgba(255,255,255,.06); color:var(--muted); border:1px solid rgba(255,255,255,.08);}
 .badge.risk {background: rgba(240,109,109,.12); border-color: rgba(240,109,109,.28); color:#f3b3b3;}
 .badge.ok {background: rgba(105,193,163,.12); border-color: rgba(105,193,163,.28); color:#b6e6d6;}
+# append to QUIET_LUXURY_CSS (keep the rest unchanged)
+.calc-note { color: var(--muted); font-size: 0.82rem; line-height: 1.25rem; margin-top: .25rem; }
+
 </style>
 """
 
