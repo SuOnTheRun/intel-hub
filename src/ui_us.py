@@ -4,13 +4,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
-from .narratives import strategist_playbook
 
 from .theming import set_dark_theme
 from .collectors import (
     fetch_latest_news, fetch_tsa_throughput, fetch_market_snapshot,
 )
 from .risk_model import compute_inputs, compute_tension_index, tension_breakdown, market_momentum
+from .narratives import strategist_playbook
 from .narratives import strategist_playbook
 
 def _fmt(x):
