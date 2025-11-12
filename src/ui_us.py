@@ -17,14 +17,26 @@ def render():
     st.title("United States — Intelligence Command Center")
     st.caption("Live OSINT / HUMINT | Situational Awareness & Early Warning")
 
-    # === DATA PULLS ===
-    inputs, frames = compute_inputs()
-    tension = compute_tension_index(inputs)
-    market_snap, market_hist = fetch_market_snapshot()
-    tsa_df = frames["tsa"]
-    news_df = fetch_latest_news(region="us", limit=40)
-    cisa_df = frames["cisa"]
-    fema_df = frames["fema"]
+    # === DATA PULLS (shielded) ===
+    try:
+        inputs, frames = compute_inputs()
+    except Exception:
+        # If any upstream source blows up, keep the page alive with empty frames.
+        inputs = type("Obj", (), dict(
+            cisa_count_3d=0, fema_count_14d=0, gdelt_count=0,
+            gdelt_tone_mean=0.0, vix_level=0.0, tsa_delta_pct=0.0
+        ))()
+        frames = {"gkg": pd.DataFrame(), "cisa": pd.DataFrame(), "fema": pd.DataFrame(),
+                  "tsa": pd.DataFrame(), "market_hist": pd.DataFrame()}
+    try:
+        market_snap, market_hist = fetch_market_snapshot()
+    except Exception:
+        market_snap, market_hist = ({}, pd.DataFrame())
+    tsa_df   = frames.get("tsa", pd.DataFrame())
+    news_df  = fetch_latest_news(region="us", limit=40)
+    cisa_df  = frames.get("cisa", pd.DataFrame())
+    fema_df  = frames.get("fema", pd.DataFrame())
+
 
     # === METRIC DECK ===
     from .methodology import method_note
