@@ -20,12 +20,14 @@ hr {border:0; height:1px; background:linear-gradient(90deg,transparent,rgba(255,
   background: var(--panel); border-radius: var(--r); border:1px solid rgba(255,255,255,.07); box-shadow: var(--shadow);
   padding: 12px 14px;
 }
+/* IMPORTANT: do NOT style all Markdown containers as cards */
+
 [data-testid="stMetric"] { background: var(--soft); }
 div[data-testid="stMetricValue"] { color: var(--accent); font-weight:800; }
 
 /* Remove “bubble” feel */
 .sidebar .block-container, .stSidebar .block-container { padding: .5rem .5rem 1rem; }
-.stSidebar [data-testid="stMarkdownContainer"], .stSidebar [data-testid="stRadio"] { background: var(--panel); border:1px solid rgba(255,255,255,.07); border-radius: var(--r); padding:10px 12px; box-shadow: var(--shadow); }
+.stSidebar [data-testid="stRadio"] { background: var(--panel); border:1px solid rgba(255,255,255,.07); border-radius: var(--r); padding:10px 12px; box-shadow: var(--shadow); }
 .stSidebar [data-testid="stHeader"] { background: transparent; border:0; box-shadow:none; }
 
 /* Tables */
@@ -39,6 +41,13 @@ a {color: var(--accent-2); text-decoration: none;} a:hover {text-decoration: und
 .calc-note { color: var(--muted); font-size:.85rem; line-height:1.25rem; margin-top:.25rem; }
 .small { font-size:.86rem; color: var(--muted); }
 .section-title { margin-bottom:.2rem; }
+.section-head { font-weight:700; margin:.1rem 0 .4rem; letter-spacing:.2px; }
+.section-head:after {
+  content:""; display:block; height:1px; margin-top:6px;
+  background: linear-gradient(90deg, var(--accent) 0%, rgba(255,255,255,.12) 40%, transparent 80%);
+  opacity:.55;
+}
+
 </style>
 """
 
