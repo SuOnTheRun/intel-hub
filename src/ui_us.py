@@ -1,10 +1,10 @@
 # src/ui_us.py
 from __future__ import annotations
-from .narratives import strategist_playbook
 import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
+from .narratives import strategist_playbook
 
 from .theming import set_dark_theme
 from .collectors import (
