@@ -231,50 +231,80 @@ def _as_utc_index(idx) -> pd.DatetimeIndex:
     return idx.tz_convert("UTC")
 
 
-def compute_inputs() -> Tuple[RiskInputs, Dict[str, pd.DataFrame]]:
+def compute_inputs() -> tuple[RiskInputs, dict[str, pd.DataFrame]]:
     """
-    Builds a same-day snapshot used by the UI metrics. Also returns the raw frames.
-    All quantities are directly computed from the live sources (no priors).
+    Build the RiskInputs dataclass and a frames dict used by the UI.
+    All external fetches are wrapped to avoid hard failures.
     """
-    series = build_component_series()
-    gd = series["gdelt"]
-    cisa = series["cisa"]
-    fema = series["fema"]
-    vix = series["vix"]
-    tsa = series["tsa"]
+    # --- core daily series ---
+    try:
+        cisa = _cisa_daily()           # pd.Series (UTC index)
+    except Exception:
+        cisa = pd.Series(dtype="float64")
+    try:
+        fema = _fema_daily()           # pd.Series (UTC index)
+    except Exception:
+        fema = pd.Series(dtype="float64")
+    try:
+        gkg = fetch_gdelt_gkg_last_n_days(2)   # pd.DataFrame
+    except Exception:
+        gkg = pd.DataFrame()
 
-    # Today-like indices (use most recent available point for each series)
-    tone_mean = float(gd["tone_mean"].dropna().iloc[-1]) if not gd.empty else np.nan
-    doc_count = int(gd["doc_count"].dropna().iloc[-1]) if not gd.empty else 0
-    cisa_3d = int(cisa.tail(3).fillna(0).sum()) if not cisa.empty else 0
-    fema_14d = int(fema.tail(14).fillna(0).sum()) if not fema.empty else 0
-    vix_level = float(vix.dropna().iloc[-1]) if not vix.empty else np.nan
-    tsa_delta = float(tsa.dropna().iloc[-1]) if not tsa.empty else np.nan
+    # --- market + mobility ---
+    try:
+        market_snap, market_hist = fetch_market_snapshot()
+        vix_level = float(market_snap.get("VIX", float("nan")))
+    except Exception:
+        market_hist, vix_level = pd.DataFrame(), float("nan")
+
+    try:
+        tsa = fetch_tsa_throughput()   # pd.DataFrame
+        tsa_delta = float(tsa["delta_vs_2019_pct"].dropna().iloc[-1]) if not tsa.empty else float("nan")
+    except Exception:
+        tsa, tsa_delta = pd.DataFrame(), float("nan")
+
+    # --- inputs for the index ---
+    cisa_3d = int(float(cisa.tail(3).fillna(0).sum())) if isinstance(cisa, pd.Series) and not cisa.empty else 0
+    fema_14d = int(float(fema.tail(14).fillna(0).sum())) if isinstance(fema, pd.Series) and not fema.empty else 0
+    gdelt_count = int(gkg.shape[0]) if isinstance(gkg, pd.DataFrame) else 0
+    gdelt_tone_mean = float(gkg["tone"].mean()) if isinstance(gkg, pd.DataFrame) and "tone" in gkg else 0.0
 
     inputs = RiskInputs(
-        gdelt_tone_mean=0.0 if np.isnan(tone_mean) else tone_mean,
-        gdelt_count=doc_count,
         cisa_count_3d=cisa_3d,
         fema_count_14d=fema_14d,
-        vix_level=0.0 if np.isnan(vix_level) else vix_level,
-        tsa_delta_pct=0.0 if np.isnan(tsa_delta) else tsa_delta,
+        gdelt_count=gdelt_count,
+        gdelt_tone_mean=gdelt_tone_mean,
+        vix_level=vix_level,
+        tsa_delta_pct=tsa_delta,
     )
-    # Also hand back frames needed by the UI
-   def _as_utc_index(idx) -> pd.DatetimeIndex:
-    idx = pd.to_datetime(idx, errors="coerce")
-    return idx.tz_localize("UTC") if getattr(idx, "tz", None) is None else idx.tz_convert("UTC")
 
-frames = {
-    "gkg": fetch_gdelt_gkg_last_n_days(2),
-    "cisa": pd.DataFrame(
-        {"time": _as_utc_index(cisa.index), "count": cisa.values}
-    ).sort_values("time", ascending=False).head(30),
-    "fema": pd.DataFrame(
-        {"time": _as_utc_index(fema.index), "count": fema.values}
-    ).sort_values("time", ascending=False).head(30),
-    "tsa": fetch_tsa_throughput(),
-    "market_hist": fetch_market_snapshot()[1],
-}
+    # --- frames for UI cards (tz-safe dates) ---
+    frames: dict[str, pd.DataFrame] = {}
+
+    frames["gkg"] = gkg if isinstance(gkg, pd.DataFrame) else pd.DataFrame()
+
+    if isinstance(cisa, pd.Series) and not cisa.empty:
+        frames["cisa"] = (
+            pd.DataFrame({"time": _as_utc_index(cisa.index), "count": cisa.values})
+            .sort_values("time", ascending=False)
+            .head(30)
+        )
+    else:
+        frames["cisa"] = pd.DataFrame(columns=["time", "count"])
+
+    if isinstance(fema, pd.Series) and not fema.empty:
+        frames["fema"] = (
+            pd.DataFrame({"time": _as_utc_index(fema.index), "count": fema.values})
+            .sort_values("time", ascending=False)
+            .head(30)
+        )
+    else:
+        frames["fema"] = pd.DataFrame(columns=["time", "count"])
+
+    frames["tsa"] = tsa if isinstance(tsa, pd.DataFrame) else pd.DataFrame()
+    frames["market_hist"] = market_hist if isinstance(market_hist, pd.DataFrame) else pd.DataFrame()
+
+    return inputs, frames
 
 
 
