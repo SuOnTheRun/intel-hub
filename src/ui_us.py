@@ -1,7 +1,6 @@
 # src/ui_us.py
 from __future__ import annotations
 from .narratives import strategist_playbook
-from __future__ import annotations
 import streamlit as st
 import pandas as pd
 import numpy as np
