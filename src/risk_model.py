@@ -124,41 +124,41 @@ def _cisa_daily() -> pd.Series:
 
 def _fema_daily() -> pd.Series:
     """
-    Daily count of FEMA disaster declarations (last 90 days).
-    We use the FEMA API paging via $top and orderby=declarationDate desc.
-    collectors.fetch_fema_disasters() returns only recent rows; for a longer
-    window we build a series by repeatedly calling until >90 days covered.
+    Daily count of FEMA disaster declarations (~last 90 days).
+    Gentle paging; returns a UTC-indexed daily series.
     """
-    # Pull several pages (~500 each) until we pass 90 days or run out.
-    # Keep it simple and gentle: 3 pages * 500 items typically covers 90+ days.
     rows: List[pd.DataFrame] = []
     base = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
     url = f"{base}?$orderby=declarationDate%20desc&$top=500"
-    import requests
     from .collectors import _http_get  # reuse client
+    import requests
 
     for _ in range(3):
-        r = _http_get(url)
-        js = r.json().get("DisasterDeclarationsSummaries", [])
+        try:
+            r = _http_get(url)
+            js = r.json().get("DisasterDeclarationsSummaries", [])
+        except Exception:
+            js = []
         if not js:
             break
         df = pd.DataFrame(js)
         rows.append(df)
-        # Use the last seen declarationDate to continue (no native offset API,
-        # so we break once we cross our time horizon)
-        last_date = pd.to_datetime(df["declarationDate"]).min()
-        if (pd.Timestamp.utcnow().tz_localize("UTC") - last_date) > pd.Timedelta(days=95):
+
+        # Stop when we’ve covered ~90 days. NOTE: to_datetime(..., utc=True) is tz-aware.
+        last_date = pd.to_datetime(df["declarationDate"], utc=True).min()
+        # pd.Timestamp.utcnow() is already tz-aware; don't tz_localize, just compare.
+        if (pd.Timestamp.utcnow() - last_date) > pd.Timedelta(days=95):
             break
 
     if not rows:
-        idx = pd.date_range(_now().date() - pd.Timedelta(days=89), periods=90, freq="D")
+        idx = pd.date_range(pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=89), periods=90, freq="D", tz="UTC")
         return pd.Series(index=idx, data=np.nan, name="fema_count")
 
     all_df = pd.concat(rows, ignore_index=True)
-    all_df["date"] = pd.to_datetime(all_df["declarationDate"], utc=True).dt.date
+    all_df["date"] = pd.to_datetime(all_df["declarationDate"], utc=True).dt.normalize()  # UTC midnight
     daily = all_df.groupby("date").size().rename("fema_count").sort_index()
-    idx = pd.date_range(pd.to_datetime(daily.index.min()), pd.to_datetime(daily.index.max()), freq="D")
-    daily.index = pd.to_datetime(daily.index)
+    # Ensure continuous UTC daily index
+    idx = pd.date_range(daily.index.min(), daily.index.max(), freq="D", tz="UTC")
     daily = daily.reindex(idx)
     return daily
 
