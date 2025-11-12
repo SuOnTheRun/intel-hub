@@ -1,10 +1,11 @@
+[theme]
+base = "dark"
+primaryColor = "#e0c078"
+backgroundColor = "#0f1113"
+secondaryBackgroundColor = "#171a1d"
+textColor = "#e4e6ea"
+
 [server]
 headless = true
-port = 8501
-address = "0.0.0.0"
-maxUploadSize = 15
-fileWatcherType = "none"        # lowers boot cost on Render
-[client]
-showErrorDetails = false
-[theme]
-base="light"
+enableXsrfProtection = true
+enableCORS = true
