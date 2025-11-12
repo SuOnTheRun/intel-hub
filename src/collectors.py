@@ -1,641 +1,170 @@
-# src/collectors.py — coverage-first, capped, cached, UTC-safe (stable)
-
+# src/collectors.py
 from __future__ import annotations
-
-import os, json, time, random, urllib.request, io
-from typing import Dict, List, Tuple
-from urllib.parse import urlparse
+import io, os, re, time, json, math, zipfile
 from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import numpy as np
 import requests
-import xml.etree.ElementTree as ET
+import requests_cache
+import feedparser
+import yfinance as yf
 
-# Optional deps (tolerate absence)
-try:
-    import feedparser  # type: ignore
-except Exception:
-    feedparser = None
+# A single shared cache for all HTTP calls (SQLite on disk).
+requests_cache.install_cache(
+    "intel_cache",
+    backend="sqlite",
+    expire_after=timedelta(minutes=15),  # sensible default; some sources override via .cache()
+)
 
-try:
-    from pytrends.request import TrendReq
-except Exception:
-    TrendReq = None
+UTC = timezone.utc
 
-try:
-    from fredapi import Fred
-except Exception:
-    Fred = None
+# --------- UTILITIES
 
-# -----------------------------
-# Tunables for Render free-tier
-# -----------------------------
-MAX_TOTAL_FEEDS         = 64
-MANDATORY_PER_CATEGORY  = 2
-OPTIONAL_PER_CATEGORY   = 2
-MAX_ITEMS_PER_FEED      = 60
-PER_REQUEST_TIMEOUT     = 8
-DISK_CACHE_TTL_SEC      = 600  # 10 minutes
-DISK_CACHE_DIR          = "data"
-DISK_CACHE_PATH         = os.path.join(DISK_CACHE_DIR, "news_cache_v5.json")  # bump to kill stale cache
+def _now():
+    return datetime.now(UTC)
 
-# -----------------------------
-# UTC helpers
-# -----------------------------
-from dateutil import parser as dtparser
-from datetime import timezone as _tz, timedelta as _td
+def _http_get(url: str, **kwargs) -> requests.Response:
+    headers = kwargs.pop("headers", {})
+    headers.setdefault("User-Agent", "US-Intel-Hub/1.0 (+https://render.com)")
+    r = requests.get(url, headers=headers, timeout=kwargs.pop("timeout", 30), **kwargs)
+    r.raise_for_status()
+    return r
 
-def utcnow() -> pd.Timestamp:
-    return pd.Timestamp.now(tz="UTC")
-
-_TZINFOS = {
-    "UTC": 0, "GMT": 0,
-    "EST": -5*3600, "EDT": -4*3600,
-    "CST": -6*3600, "CDT": -5*3600,
-    "MST": -7*3600, "MDT": -6*3600,
-    "PST": -8*3600, "PDT": -7*3600,
-    "BST": 1*3600, "WET": 0, "WEST": 1*3600,
-    "CET": 1*3600, "CEST": 2*3600, "EET": 2*3600, "EEST": 3*3600,
-    "IST": 19800, "JST": 9*3600, "KST": 9*3600, "HKT": 8*3600, "SGT": 8*3600,
-    "AEST": 10*3600, "AEDT": 11*3600,
-}
-
-def _to_utc(ts_str: str | None) -> pd.Timestamp:
-    if not ts_str:
-        return utcnow()
+def _to_dt(x):
+    if isinstance(x, datetime):
+        return x.astimezone(UTC)
     try:
-        dt = dtparser.parse(ts_str, tzinfos={k: _td(seconds=v) for k, v in _TZINFOS.items()})
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=_tz.utc)
-        return pd.Timestamp(dt.astimezone(_tz.utc))
-    except Exception:
-        return utcnow()
-
-# -----------------------------
-# Disk cache (versioned)
-# -----------------------------
-def _cache_write(df: pd.DataFrame) -> None:
-    try:
-        os.makedirs(DISK_CACHE_DIR, exist_ok=True)
-        payload = {
-            "ts": time.time(),
-            "rows": df.assign(published_dt=df["published_dt"].astype(str)).to_dict(orient="records"),
-        }
-        with open(DISK_CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-    except Exception:
-        pass
-
-def _cache_read() -> pd.DataFrame | None:
-    try:
-        if not os.path.exists(DISK_CACHE_PATH):
-            return None
-        with open(DISK_CACHE_PATH, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if time.time() - float(payload.get("ts", 0)) > DISK_CACHE_TTL_SEC:
-            return None
-        rows = payload.get("rows", [])
-        if not rows:
-            return None
-        df = pd.DataFrame(rows)
-        if "published_dt" not in df.columns:
-            return None
-        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(utcnow())
-        return df.sort_values("published_dt", ascending=False).reset_index(drop=True)
+        return datetime.fromisoformat(str(x).replace("Z","+00:00")).astimezone(UTC)
     except Exception:
         return None
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def _domain(url: str) -> str:
-    try:
-        return urlparse(url).netloc.replace("www.", "")
-    except Exception:
-        return ""
-
-def _fetch_feed(url: str, max_items: int = MAX_ITEMS_PER_FEED, timeout: int = PER_REQUEST_TIMEOUT) -> List[Dict]:
-    items: List[Dict] = []
-    try:
-        if feedparser:
-            d = feedparser.parse(url, request_headers={"User-Agent": "intel-hub/1.0"})
-            for e in d.entries[:max_items]:
-                title = getattr(e, "title", "") or ""
-                link  = getattr(e, "link", "") or ""
-                desc  = getattr(e, "summary", "") or getattr(e, "description", "") or ""
-                if getattr(e, "published", None):
-                    published = _to_utc(getattr(e, "published"))
-                elif getattr(e, "updated", None):
-                    published = _to_utc(getattr(e, "updated"))
-                else:
-                    published = utcnow()
-                items.append({"title": title, "link": link, "summary": desc, "published_dt": published})
-            return items
-
-        # Fallback XML
-        req = urllib.request.Request(url, headers={"User-Agent": "intel-hub/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = r.read()
-        root = ET.fromstring(data)
-        nodes = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
-        for n in nodes[:max_items]:
-            title = (n.findtext("title") or n.findtext("{http://www.w3.org/2005/Atom}title") or "").strip()
-            link_node = n.find("link") or n.find("{http://www.w3.org/2005/Atom}link")
-            link = (link_node.text or link_node.get("href")) if link_node is not None else ""
-            desc = (n.findtext("description") or n.findtext("{http://www.w3.org/2005/Atom}summary") or "")[:1000]
-            pub  = n.findtext("pubDate") or n.findtext("{http://www.w3.org/2005/Atom}updated") or ""
-            items.append({"title": title, "link": link, "summary": desc, "published_dt": _to_utc(pub)})
-    except Exception:
-        pass
-    return items
-
-def _plan_feeds(catalog: Dict[str, List[str]]) -> List[Tuple[str, str]]:
-    mandatory: List[Tuple[str, str]] = []
-    optional:  List[Tuple[str, str]] = []
-    for cat, urls in catalog.items():
-        urls = list(urls)
-        for u in urls[:MANDATORY_PER_CATEGORY]:
-            mandatory.append((cat, u))
-        rest = urls[MANDATORY_PER_CATEGORY:]
-        random.shuffle(rest)
-        for u in rest[:OPTIONAL_PER_CATEGORY]:
-            optional.append((cat, u))
-    random.shuffle(mandatory); random.shuffle(optional)
-    return (mandatory + optional)[:MAX_TOTAL_FEEDS]
-
-# -----------------------------
-# Coverage-first NEWS pull (canonical, single implementation)
-# -----------------------------
-def get_news_dataframe(catalog_path: str) -> pd.DataFrame:
+# --------- GOOGLE NEWS RSS (no key)
+def fetch_latest_news(region: str = "us", query: Optional[str] = None, limit: int = 25) -> pd.DataFrame:
     """
-    Returns a DataFrame with columns:
-      [category, source, title, link, summary, published_dt]
-    All timestamps are tz-aware UTC. Always returns this schema (possibly empty).
+    Google News RSS. Region-aware feed.
     """
-    expected_cols = ["category", "source", "title", "link", "summary", "published_dt"]
-
-    cached = _cache_read()
-    if cached is not None and not cached.empty:
-        for c in expected_cols:
-            if c not in cached.columns:
-                cached[c] = "" if c != "published_dt" else pd.NaT
-        cached["published_dt"] = pd.to_datetime(cached["published_dt"], utc=True, errors="coerce").fillna(utcnow())
-        return cached[expected_cols]
-
-    try:
-        with open(catalog_path, "r", encoding="utf-8") as f:
-            catalog = json.load(f)
-    except Exception:
-        catalog = {}
-
-    rows: List[Dict] = []
-    for category, url in _plan_feeds(catalog):
-        for it in _fetch_feed(url):
-            rows.append({
-                "category": category,
-                "source": _domain(it.get("link", "")),
-                "title": it.get("title", ""),
-                "link": it.get("link", ""),
-                "summary": it.get("summary", ""),
-                "published_dt": it.get("published_dt", utcnow()),
-            })
-
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return pd.DataFrame(columns=expected_cols)
-
-    try:
-        df["title"] = df["title"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
-        df["summary"] = df["summary"].fillna("").astype(str)
-        df["published_dt"] = pd.to_datetime(df["published_dt"], utc=True, errors="coerce").fillna(utcnow())
-    except Exception:
-        df["published_dt"] = utcnow()
-
-    df = df.sort_values("published_dt", ascending=False).reset_index(drop=True)
-    _cache_write(df)
-    return df[expected_cols]
-
-# ============================================================
-# US-SCOPED COLLECTORS (helpers)
-# ============================================================
-_NAIVE_NOW = datetime.utcnow().replace(tzinfo=timezone.utc)
-
-def _safe_df(df: pd.DataFrame, cols=None) -> pd.DataFrame:
-    if df is None or not isinstance(df, pd.DataFrame):
-        return pd.DataFrame(columns=cols or [])
-    return df
-
-def _to_dt(x):
-    try:
-        return pd.to_datetime(x, utc=True)
-    except Exception:
-        return pd.NaT
-
-def collect_us_google_news(categories: list[str] | None = None, max_items: int = 400) -> pd.DataFrame:
-    base_feeds = ["https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"]
-    for cat in (categories or []):
-        base_feeds.append(f"https://news.google.com/rss/search?q={requests.utils.quote(cat)}&hl=en-US&gl=US&ceid=US:en")
+    base = f"https://news.google.com/rss?hl=en-{region.upper()}&gl={region.upper()}&ceid={region.upper()}:en"
+    url = base if not query else base + "&q=" + requests.utils.quote(query)
+    feed = feedparser.parse(url)
     rows = []
-    for url in base_feeds:
-        try:
-            feed = feedparser.parse(url) if feedparser else None
-            if not feed:
-                continue
-            for e in feed.entries[:max_items]:
-                rows.append({
-                    "published": _to_dt(getattr(e, "published", getattr(e, "updated", None))),
-                    "source": getattr(getattr(e, "source", {}), "title", None) or getattr(e, "source", None),
-                    "title": getattr(e, "title", None),
-                    "link": getattr(e, "link", None),
-                    "summary": getattr(e, "summary", None),
-                    "category": "General" if url.endswith("US:en") else "Search",
-                })
-        except Exception:
-            continue
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.dropna(subset=["title"]).drop_duplicates(subset=["title"]).sort_values("published", ascending=False)
-    return df
+    for e in feed.entries[:limit]:
+        rows.append({
+            "time": _to_dt(getattr(e, "published", None)) or _now(),
+            "source": getattr(getattr(e, "source", None), "title", "") or "GoogleNews",
+            "title": e.title,
+            "link": e.link
+        })
+    return pd.DataFrame(rows).sort_values("time", ascending=False).reset_index(drop=True)
 
-def collect_us_gdelt_events(hours_back: int = 48) -> pd.DataFrame:
-    end = _NAIVE_NOW
-    start = end - timedelta(hours=hours_back)
-    def _hourly_keys(start_dt, end_dt):
-        t = start_dt.replace(minute=0, second=0, microsecond=0)
-        while t <= end_dt:
-            yield t.strftime("%Y%m%d%H%M%S"); t += timedelta(hours=1)
-    frames = []
-    for ts in _hourly_keys(start, end):
-        url = f"http://data.gdeltproject.org/gdeltv2/{ts}.export.CSV.zip"
+# --------- GDELT GKG/Events (no key)
+def _gdelt_day_url(day: datetime, kind: str) -> str:
+    day_str = day.strftime("%Y%m%d")
+    if kind == "gkg":
+        return f"http://data.gdeltproject.org/gdeltv2/{day_str}.gkg.csv.zip"
+    if kind == "events":
+        return f"http://data.gdeltproject.org/events/{day_str}.export.CSV.zip"
+    raise ValueError("kind must be gkg|events")
+
+def fetch_gdelt_gkg_last_n_days(n_days: int = 2) -> pd.DataFrame:
+    """
+    Pull GDELT GKG for last n_days; returns columns: datetime, sourceurl, tone, themes, locations.
+    """
+    frames: List[pd.DataFrame] = []
+    for i in range(n_days):
+        day = _now() - timedelta(days=i)
         try:
-            r = requests.get(url, timeout=20)
-            if r.status_code != 200 or not r.content:
-                continue
-            import zipfile
+            r = _http_get(_gdelt_day_url(day, "gkg"))
             with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
-                names = zf.namelist()
-                if not names: continue
-                with zf.open(names[0]) as fh:
-                    df = pd.read_csv(fh, sep="\t", header=None, low_memory=False).rename(columns={
-                        0:"GLOBALEVENTID", 1:"SQLDATE", 26:"IsRootEvent", 27:"EventCode",
-                        30:"NumMentions", 31:"NumSources", 32:"NumArticles", 33:"AvgTone",
-                        52:"ActionGeo_FullName", 53:"ActionGeo_CountryCode", 57:"DATEADDED"
-                    })
-                    df = df[df["ActionGeo_CountryCode"] == "US"]
-                    if df.empty: continue
-                    df["ts"] = pd.to_datetime(df["DATEADDED"], format="%Y%m%d%H%M%S", utc=True, errors="coerce")
-                    frames.append(df[["ts","GLOBALEVENTID","EventCode","NumMentions","NumArticles","AvgTone",
-                                      "ActionGeo_FullName","ActionGeo_CountryCode"]])
+                name = [n for n in zf.namelist() if n.endswith(".csv")][0]
+                df = pd.read_csv(zf.open(name), sep="\t", header=None, dtype=str, quoting=3, on_bad_lines="skip")
+                # Reference: http://data.gdeltproject.org/documentation/GDELT-Global_Knowledge_Graph_Codebook-V2.1.pdf
+                df = df[[1, 3, 7, 9, 13]].copy()
+                df.columns = ["datetime", "sourceurl", "themes", "tone", "locations"]
+                # tone column is a semicolon-delimited metrics; first value is Tone
+                df["tone"] = df["tone"].astype(str).str.split(",").str[0].astype(float)
+                df["datetime"] = pd.to_datetime(df["datetime"], format="%Y%m%d%H%M%S", utc=True, errors="coerce")
+                frames.append(df)
         except Exception:
             continue
-        time.sleep(0.3)
     if not frames:
-        return pd.DataFrame(columns=["ts","GLOBALEVENTID","EventCode","NumMentions","NumArticles","AvgTone",
-                                     "ActionGeo_FullName","ActionGeo_CountryCode"])
+        return pd.DataFrame(columns=["datetime","sourceurl","themes","tone","locations"])
     out = pd.concat(frames, ignore_index=True)
-    return out.sort_values("ts", ascending=False)
+    # Filter items that appear to be US-related via location string or "US"/state names
+    states = ("United States","U.S.","USA","US", "New York","California","Texas","Florida","Illinois","Washington","Virginia","Georgia","Ohio","Pennsylvania","Arizona","North Carolina","New Jersey","Michigan","Massachusetts","Maryland","Colorado","Tennessee","Indiana","Missouri","Minnesota","Wisconsin","Alabama","Oregon","South Carolina","Kentucky","Oklahoma","Connecticut","Iowa","Utah","Nevada","Arkansas","Mississippi","Kansas","New Mexico","Nebraska","Idaho","West Virginia","Hawaii","New Hampshire","Maine","Rhode Island","Montana","Delaware","South Dakota","North Dakota","Vermont","Wyoming","Alaska","District of Columbia")
+    mask = out["locations"].fillna("").str.contains("|".join(map(re.escape, states)))
+    return out.loc[mask].reset_index(drop=True)
 
-_PURCHASE_KEYWORDS = [
-    "buy now","discount","coupon","financing","interest rate car",
-    "best smartphone","gym membership","air conditioner","home loan",
-    "fast food near me","restaurant deals","tv sale","travel deals"
-]
+# --------- TSA CHECKPOINT THROUGHPUT (no key)
+def fetch_tsa_throughput() -> pd.DataFrame:
+    """
+    Official TSA CSV: https://www.tsa.gov/travel/passenger-volumes
+    Provides date and throughput for 2019 and current years.
+    """
+    url = "https://www.tsa.gov/sites/default/files/tsacheckpointtravelnumbers.csv"
+    r = _http_get(url)
+    df = pd.read_csv(io.StringIO(r.text))
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    # keep last 180 days; compute 7d avg and baseline vs 2019
+    df["date"] = pd.to_datetime(df["date"], utc=True)
+    df = df.sort_values("date")
+    today_year = df["date"].dt.year.max()
+    cur = df.rename(columns={str(today_year): "current", "2019": "baseline_2019"})
+    cur["current_7dma"] = cur["current"].rolling(7).mean()
+    cur["baseline_7dma"] = cur["baseline_2019"].rolling(7).mean()
+    cur["delta_vs_2019_pct"] = ((cur["current_7dma"] - cur["baseline_7dma"]) / cur["baseline_7dma"]) * 100
+    return cur.tail(210).reset_index(drop=True)
 
-def collect_us_trends(keywords: list[str] | None = None, days: int = 90) -> pd.DataFrame:
-    if TrendReq is None:
-        return pd.DataFrame(columns=["date","term","interest"])
-    kw = keywords or _PURCHASE_KEYWORDS
-    pytrends = TrendReq(hl="en-US", tz=360)
-    start = (_NAIVE_NOW - timedelta(days=days)).strftime("%Y-%m-%d")
-    timeframe = f"{start} {_NAIVE_NOW.strftime('%Y-%m-%d')}"
-    rows = []
-    for i in range(0, len(kw), 5):
-        group = kw[i:i+5]
-        try:
-            pytrends.build_payload(group, cat=0, timeframe=timeframe, geo="US")
-            df = pytrends.interest_over_time()
-            if df is None or df.empty: continue
-            df = df.reset_index().rename(columns={"date":"date"})
-            for g in group:
-                if g in df.columns:
-                    part = df[["date", g]].rename(columns={g:"interest"})
-                    part["term"] = g
-                    rows.append(part[["date","term","interest"]])
-        except Exception:
-            continue
-        time.sleep(0.3)
-    if not rows:
-        return pd.DataFrame(columns=["date","term","interest"])
-    out = pd.concat(rows, ignore_index=True)
-    out["date"] = pd.to_datetime(out["date"], utc=True)
-    return out.sort_values("date")
-
-_FRED_SERIES = {
-    "UMCSENT": "consumer_sentiment",
-    "RSAFS": "retail_sales",
-    "UNRATE": "unemployment_rate",
+# --------- MARKETS via yfinance (no key)
+_TICKERS = {
+    "S&P 500": "^GSPC",
+    "Nasdaq 100": "^NDX",
+    "VIX": "^VIX",
+    "10Y": "^TNX",  # CBOE 10Y yield index (approx)
 }
 
-def collect_us_fred() -> pd.DataFrame:
-    if Fred is None:
-        return pd.DataFrame(columns=["date","series","value"])
-    key = os.environ.get("FRED_API_KEY", "").strip()
-    if not key:
-        return pd.DataFrame(columns=["date","series","value"])
-    fred = Fred(api_key=key)
+def fetch_market_snapshot() -> Tuple[Dict[str, float], pd.DataFrame]:
+    data = {}
+    hist_frames = []
+    for name, t in _TICKERS.items():
+        tk = yf.Ticker(t)
+        try:
+            price = float(tk.info.get("regularMarketPrice") or tk.fast_info.last_price)
+        except Exception:
+            price = np.nan
+        data[name] = price
+        h = tk.history(period="3mo", interval="1d")["Close"].rename(name)
+        hist_frames.append(h)
+    hist = pd.concat(hist_frames, axis=1)
+    return data, hist
+
+# --------- CISA Alerts RSS (no key)
+def fetch_cisa_alerts(limit: int = 30) -> pd.DataFrame:
+    url = "https://www.cisa.gov/cybersecurity-advisories/all.xml"
+    feed = feedparser.parse(url)
     rows = []
-    for sid, name in _FRED_SERIES.items():
-        try:
-            s = fred.get_series(sid)
-            df = s.reset_index()
-            df.columns = ["date","value"]
-            df["date"] = pd.to_datetime(df["date"], utc=True)
-            df["series"] = name
-            rows.append(df[["date","series","value"]])
-        except Exception:
-            continue
-        time.sleep(0.2)
-    if not rows:
-        return pd.DataFrame(columns=["date","series","value"])
-    out = pd.concat(rows, ignore_index=True).sort_values(["series","date"])
-    return out
+    for e in feed.entries[:limit]:
+        rows.append({
+            "time": _to_dt(getattr(e,"published",None)) or _now(),
+            "title": e.title,
+            "link": e.link,
+        })
+    return pd.DataFrame(rows).sort_values("time", ascending=False).reset_index(drop=True)
 
-# ============================================================
-# Class-based collectors used by app.py
-# ============================================================
-class NewsCollector:
-    _fallback_terms = {
-        "Macro": ["inflation", "interest rates", "consumer spending"],
-        "Technology": ["AI", "semiconductor", "data center", "cloud"],
-        "Consumer": ["retail sales", "qsr", "loyalty program"],
-        "Energy": ["oil price", "LNG", "renewable"],
-        "Healthcare": ["FDA", "drug approval", "biotech"],
-        "Finance": ["bank earnings", "credit card", "ETF"],
-        "Retail": ["ecommerce", "omnichannel", "foot traffic"],
-        "Autos": ["EV sales", "hybrid", "dealer inventory"]
-    }
-
-    def collect(self, categories: List[str], max_items: int = 100, lookback_days: int = 3) -> pd.DataFrame:
-        path = os.path.join(os.path.dirname(__file__), "..", "news_rss_catalog.json")
-        df = get_news_dataframe(path)
-
-        expected = ["category","source","title","link","summary","published_dt"]
-        if df is None or df.empty:
-            df = pd.DataFrame(columns=expected)
-
-        # Filter by categories if provided
-        if categories:
-            df = df[df["category"].isin(categories)]
-
-        # Time filter
-        if lookback_days:
-            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
-            if "published_dt" in df.columns:
-                df = df[df["published_dt"] >= cutoff]
-
-        # If still empty, fallback to Google News search for those categories
-        if df.empty and categories:
-            from .collectors import collect_us_google_news  # reuse existing function
-            terms = []
-            for c in categories:
-                terms += self._fallback_terms.get(c, [c])
-            g = collect_us_google_news(categories=terms, max_items=max_items)
-            if not g.empty:
-                # Normalize to expected schema
-                g = g.rename(columns={"published": "published_dt"})
-                g["category"] = categories[0] if len(categories) == 1 else "Search"
-                g["source"] = g.get("source", "")
-                g["summary"] = g.get("summary", "")
-                g["published_dt"] = pd.to_datetime(g["published_dt"], utc=True, errors="coerce").fillna(pd.Timestamp.now(tz="UTC"))
-                df = g[["category","source","title","link","summary","published_dt"]]
-
-        if not df.empty:
-            df = (df.sort_values("published_dt", ascending=False)
-                    .groupby("category", group_keys=False)
-                    .head(max_items)
-                    .reset_index(drop=True))
-        return df[expected] if set(expected).issubset(df.columns) else df
-
-
-class GovCollector:
-    def collect(self, max_items: int = 200, lookback_days: int = 7) -> pd.DataFrame:
-        path = os.path.join(os.path.dirname(__file__), "..", "gov_regulatory_feeds.json")
-        df = get_news_dataframe(path)
-        if df.empty:
-            return pd.DataFrame(columns=["category","source","title","link","summary","published_dt"])
-        cutoff = utcnow() - pd.Timedelta(days=int(lookback_days))
-        df = df[df["published_dt"] >= cutoff]
-        if not df.empty:
-            df = (df.sort_values("published_dt", ascending=False)
-                    .groupby("source", group_keys=False)
-                    .head(int(max_items))
-                    .reset_index(drop=True))
-        return df
-
-class SocialCollector:
-    def collect(self, categories: List[str], max_items: int = 120, lookback_days: int = 3) -> pd.DataFrame:
-        path = os.path.join(os.path.dirname(__file__), "..", "social_sources.json")
-        df = get_news_dataframe(path)
-        if df.empty:
-            return pd.DataFrame(columns=["category","source","title","link","summary","published_dt"])
-        if categories:
-            df = df[df["category"].isin(categories)]
-        cutoff = utcnow() - pd.Timedelta(days=int(lookback_days))
-        df = df[df["published_dt"] >= cutoff]
-        if not df.empty:
-            df = (df.sort_values("published_dt", ascending=False)
-                    .groupby("category", group_keys=False)
-                    .head(int(max_items))
-                    .reset_index(drop=True))
-        return df
-
-class MacroCollector:
-    def collect(self, lookback_days: int = 7) -> pd.DataFrame:
-        if TrendReq is None:
-            return pd.DataFrame(columns=["timestamp"])
-        kw = ["inflation", "recession", "unemployment", "interest rates", "housing"]
-        # pytrends can 429/timeout. Retry small groups.
-        try:
-            pytrends = TrendReq(hl="en-US", tz=360, timeout=(3, 7), retries=2, backoff_factor=0.2)
-        except Exception:
-            return pd.DataFrame(columns=["timestamp"])
-        rows = []
-        start = (_NAIVE_NOW - timedelta(days=max(lookback_days, 7))).strftime("%Y-%m-%d")
-        timeframe = f"{start} {_NAIVE_NOW.strftime('%Y-%m-%d')}"
-        for group in (kw[i:i+3] for i in range(0, len(kw), 3)):
-            try:
-                pytrends.build_payload(group, cat=0, timeframe=timeframe, geo="US")
-                df = pytrends.interest_over_time()
-                if df is None or df.empty:
-                    continue
-                df = df.reset_index().rename(columns={"date": "timestamp"})
-                # melt to a tidy frame
-                m = df.melt(id_vars=["timestamp"], var_name="series", value_name="value")
-                m["timestamp"] = pd.to_datetime(m["timestamp"], utc=True)
-                rows.append(m[["timestamp", "series", "value"]])
-            except Exception:
-                continue
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "series", "value"])
-        out = pd.concat(rows, ignore_index=True).sort_values("timestamp")
-        return out
-
-class TrendsCollector:
-    def collect(self, categories: List[str], lookback_days: int = 30) -> pd.DataFrame:
-        if TrendReq is None:
-            return pd.DataFrame(columns=["timestamp"])
-        cat2kw = {
-            "Technology": ["AI", "semiconductor", "cloud computing", "cybersecurity"],
-            "Consumer":   ["coupon", "discount", "loyalty program", "subscription"],
-            "Energy":     ["oil price", "gasoline price", "renewable energy"],
-            "Healthcare": ["drug approval", "telemedicine", "FDA recall"],
-            "Finance":    ["credit card", "ETF", "mortgage rate"],
-            "Retail":     ["foot traffic", "omnichannel", "same-day delivery"],
-            "Autos":      ["EV sales", "hybrid car", "dealer inventory"],
-            "Macro":      ["inflation", "interest rates", "housing market"],
-        }
-        want = []
-        for c in categories:
-            want += cat2kw.get(c, [])
-        want = list(dict.fromkeys(want))[:8] or ["macro"]
-
-        try:
-            pytrends = TrendReq(hl="en-US", tz=360, timeout=(3, 7), retries=2, backoff_factor=0.2)
-        except Exception:
-            return pd.DataFrame(columns=["timestamp","category","term","interest"])
-
-        rows = []
-        start = (_NAIVE_NOW - timedelta(days=max(lookback_days, 14))).strftime("%Y-%m-%d")
-        timeframe = f"{start} {_NAIVE_NOW.strftime('%Y-%m-%d')}"
-        for grp in (want[i:i+5] for i in range(0, len(want), 5)):
-            try:
-                pytrends.build_payload(grp, cat=0, timeframe=timeframe, geo="US")
-                df = pytrends.interest_over_time()
-                if df is None or df.empty:
-                    continue
-                df = df.reset_index().rename(columns={"date": "timestamp"})
-                for g in grp:
-                    if g in df.columns:
-                        part = df[["timestamp", g]].rename(columns={g: "interest"})
-                        part["term"] = g
-                        rows.append(part)
-            except Exception:
-                continue
-        if not rows:
-            return pd.DataFrame(columns=["timestamp","category","term","interest"])
-        out = pd.concat(rows, ignore_index=True)
-        out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True)
-        out["category"]  = " / ".join(categories) if categories else "All"
-        return out.sort_values("timestamp")
-
-
-class MobilityCollector:
-    def collect(self) -> pd.DataFrame:
-        url = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
-        try:
-            r = requests.get(url, timeout=10)
-            if r.status_code != 200 or not r.text:
-                return pd.DataFrame(columns=["date", "throughput"])
-            # Some days this CSV changes delimiter/headers slightly; be lenient.
-            import io
-            df = pd.read_csv(io.StringIO(r.text), sep=None, engine="python")
-            # Try common header variants
-            col_date = next((c for c in df.columns if str(c).strip().lower() in ("date","datum")), None)
-            col_val  = next((c for c in df.columns if "total" in str(c).lower() and "throughput" in str(c).lower()), None)
-            if not col_date or not col_val:
-                return pd.DataFrame(columns=["date","throughput"])
-            df = df.rename(columns={col_date: "date", col_val: "throughput"}).dropna(subset=["date","throughput"])
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            df = df.dropna(subset=["date"])
-            df["throughput"] = pd.to_numeric(df["throughput"], errors="coerce")
-            df = df.dropna(subset=["throughput"])
-            return df.sort_values("date", ascending=False).head(30).reset_index(drop=True)
-        except Exception:
-            return pd.DataFrame(columns=["date","throughput"])
-
-class StocksCollector:
-    """Fetch a compact snapshot of key tickers with fallback to single calls."""
-
-    def collect(self, tickers: list[str]) -> pd.DataFrame:
-        import yfinance as yf
-        import time
-
-        results = []
-        for t in tickers:
-            try:
-                data = yf.Ticker(t).history(period="5d", interval="1d")
-                if data is None or data.empty:
-                    # Wait a bit and retry once
-                    time.sleep(1.0)
-                    data = yf.Ticker(t).history(period="5d", interval="1d")
-                if data is None or data.empty:
-                    print(f"[warn] No data for {t}")
-                    continue
-
-                last = data.iloc[-1]
-                price = float(last["Close"])
-                open_ = float(last["Open"])
-                change = price - open_
-                pct = (change / open_) * 100.0 if open_ else 0.0
-                vol = float(last.get("Volume", 0))
-
-                results.append(
-                    {"ticker": t, "price": price, "change": change, "pct": pct, "volume": vol}
-                )
-            except Exception as e:
-                print(f"[error] {t}: {e}")
-                continue
-
-        if not results:
-            return pd.DataFrame(columns=["ticker", "price", "change", "pct", "volume"])
-
-        df = pd.DataFrame(results)
-        return df.sort_values("pct", ascending=False).reset_index(drop=True)
-
-class GovRegCollector:
-    def collect(self, max_items: int = 50, lookback_days: int = 14) -> pd.DataFrame:
-        path = os.path.join(os.path.dirname(__file__), "..", "gov_regulatory_feeds.json")
-        df = get_news_dataframe(path)
-        if df is None or df.empty:
-            return pd.DataFrame(columns=["source","title","link","published_dt"])
-        cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=lookback_days)
-        df = df[df["published_dt"] >= cutoff]
-        return (df.sort_values("published_dt", ascending=False)
-                  .head(max_items)
-                  .reset_index(drop=True))
-
-class MacroTrendsCollector:
-    def collect(self) -> pd.DataFrame:
-        from pytrends.request import TrendReq
-        pytrends = TrendReq(hl="en-US", tz=360)
-        kw_list = ["inflation", "interest rates", "unemployment", "consumer confidence"]
-        try:
-            pytrends.build_payload(kw_list, cat=0, timeframe="now 7-d", geo="US")
-            df = pytrends.interest_over_time()
-            if df.empty:
-                return pd.DataFrame(columns=["date","inflation","interest rates","unemployment","consumer confidence"])
-            df = df.reset_index().rename(columns={"date": "Date"})
-            return df.tail(30)
-        except Exception:
-            return pd.DataFrame(columns=["Date"] + kw_list)
-
-class CategoryTrendsCollector:
-    def collect(self, categories: List[str]) -> pd.DataFrame:
-        from pytrends.request import TrendReq
-        pytrends = TrendReq(hl="en-US", tz=360)
-        df_all = []
-        for c in categories:
-            try:
-                pytrends.build_payload([c], cat=0, timeframe="now 7-d", geo="US")
-                df = pytrends.interest_over_time().reset_index()
-                if not df.empty:
-                    df["category"] = c
-                    df_all.append(df[["date", c, "category"]])
-            except Exception:
-                continue
-        if not df_all:
-            return pd.DataFrame(columns=["date","category","value"])
-        df = pd.concat(df_all)
-        df = df.rename(columns={df.columns[1]: "value"})
-        return df
-
+# --------- FEMA Disaster Declarations (no key)
+def fetch_fema_disasters(limit: int = 50) -> pd.DataFrame:
+    # OpenFEMA API
+    url = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?$orderby=declarationDate%20desc&$top=100"
+    r = _http_get(url)
+    js = r.json().get("DisasterDeclarationsSummaries", [])
+    rows = []
+    for x in js[:limit]:
+        rows.append({
+            "time": _to_dt(x.get("declarationDate")),
+            "state": x.get("state"),
+            "type": x.get("incidentType"),
+            "title": f"{x.get('incidentType')} — {x.get('declarationTitle','')}".strip(),
+            "link": f"https://www.fema.gov/disaster/{x.get('disasterNumber')}"
+        })
+    return pd.DataFrame(rows).dropna(subset=["time"]).sort_values("time", ascending=False).reset_index(drop=True)
