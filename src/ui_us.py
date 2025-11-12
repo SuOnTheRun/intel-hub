@@ -11,13 +11,13 @@ from .collectors import (
 from .analytics import sentiment_score, drift
 from .risk_model import compute_inputs, compute_tension_index, market_momentum
 from .narratives import strategic_brief
-
 def render():
     set_dark_theme()
     st.title("United States — Intelligence Command Center")
     st.caption("Live OSINT | HUMINT | Situational Awareness & Early Warning")
+    st.write("")  # subtle spacer under the title
 
-    # Guarded data pulls
+    # === DATA PULLS (shielded) ===
     try:
         inputs, frames = compute_inputs()
     except Exception:
@@ -27,12 +27,15 @@ def render():
         ))()
         frames = {"gkg": pd.DataFrame(), "cisa": pd.DataFrame(), "fema": pd.DataFrame(),
                   "tsa": pd.DataFrame(), "market_hist": pd.DataFrame()}
-
     try:
         market_snap, market_hist = fetch_market_snapshot()
     except Exception:
         market_snap, market_hist = ({}, pd.DataFrame())
 
+    tsa_df = frames.get("tsa", pd.DataFrame())
+    news_df = fetch_latest_news(region="us", limit=40)
+    cisa_df = frames.get("cisa", pd.DataFrame())
+    fema_df = frames.get("fema", pd.DataFrame())
 
     # === DATA PULLS (shielded) ===
     try:
