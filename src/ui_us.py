@@ -2,22 +2,43 @@
 from __future__ import annotations
 import streamlit as st
 import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
 
-from .theming import set_dark_theme, hlabel
+from .theming import set_dark_theme
 from .collectors import (
     fetch_latest_news, fetch_tsa_throughput, fetch_market_snapshot,
-    fetch_cisa_alerts, fetch_fema_disasters, fetch_gdelt_gkg_last_n_days
 )
-from .analytics import sentiment_score, drift
-from .risk_model import compute_inputs, compute_tension_index, market_momentum
-from .narratives import strategic_brief
+from .risk_model import compute_inputs, compute_tension_index, tension_breakdown, market_momentum
+
+def _fmt(x):
+    if x is None or (isinstance(x, float) and np.isnan(x)): return "—"
+    if isinstance(x, float): 
+        return f"{x:.2f}".rstrip("0").rstrip(".")
+    return str(x)
+
+def _relative(ts: pd.Timestamp) -> str:
+    if not isinstance(ts, pd.Timestamp): return ""
+    if ts.tzinfo is None: ts = ts.tz_localize("UTC")
+    delta = datetime.now(timezone.utc) - ts.to_pydatetime().astimezone(timezone.utc)
+    s = int(delta.total_seconds())
+    if s < 60: return f"{s}s ago"
+    m = s//60
+    if m < 60: return f"{m}m ago"
+    h = m//60
+    if h < 24: return f"{h}h ago"
+    d = h//24
+    return f"{d}d ago"
+
+def _section_title(label): 
+    st.markdown(f"<h3 class='section-title'>{label}</h3>", unsafe_allow_html=True)
+
 def render():
     set_dark_theme()
     st.title("United States — Intelligence Command Center")
     st.caption("Live OSINT | HUMINT | Situational Awareness & Early Warning")
-    st.write("")  # subtle spacer under the title
 
-    # === DATA PULLS (shielded) ===
+    # -------- Data pulls (guarded) --------
     try:
         inputs, frames = compute_inputs()
     except Exception:
@@ -31,155 +52,105 @@ def render():
         market_snap, market_hist = fetch_market_snapshot()
     except Exception:
         market_snap, market_hist = ({}, pd.DataFrame())
-
     tsa_df = frames.get("tsa", pd.DataFrame())
-    news_df = fetch_latest_news(region="us", limit=40)
-    cisa_df = frames.get("cisa", pd.DataFrame())
-    fema_df = frames.get("fema", pd.DataFrame())
-
-    # === DATA PULLS (shielded) ===
+    news_df = pd.DataFrame()
     try:
-        inputs, frames = compute_inputs()
+        news_df = fetch_latest_news(region="us", limit=40)
     except Exception:
-        # If any upstream source blows up, keep the page alive with empty frames.
-        inputs = type("Obj", (), dict(
-            cisa_count_3d=0, fema_count_14d=0, gdelt_count=0,
-            gdelt_tone_mean=0.0, vix_level=0.0, tsa_delta_pct=0.0
-        ))()
-        frames = {"gkg": pd.DataFrame(), "cisa": pd.DataFrame(), "fema": pd.DataFrame(),
-                  "tsa": pd.DataFrame(), "market_hist": pd.DataFrame()}
-    try:
-        market_snap, market_hist = fetch_market_snapshot()
-    except Exception:
-        market_snap, market_hist = ({}, pd.DataFrame())
-    tsa_df   = frames.get("tsa", pd.DataFrame())
-    news_df  = fetch_latest_news(region="us", limit=40)
-    cisa_df  = frames.get("cisa", pd.DataFrame())
-    fema_df  = frames.get("fema", pd.DataFrame())
+        news_df = pd.DataFrame()
 
-
-    # === METRIC DECK ===
-    from .methodology import method_note
-    from .risk_model import tension_breakdown
-
+    # Compute headline list early
+    headlines = []
+    if not news_df.empty:
+        newest = news_df.head(12).copy()
+        for _, r in newest.iterrows():
+            t = _relative(pd.to_datetime(r["time"]))
+            src = r.get("source","")
+            headlines.append(f"• [{r['title']}]({r['link']})  <span class='small'>— {src} · {t}</span>")
+    
+    # -------- Top metrics (sparse, minimal) --------
     breakdown = tension_breakdown()
     tension = breakdown["index"]
+    vix_val = market_snap.get("VIX", float("nan"))
+    tsa_val = tsa_df["delta_vs_2019_pct"].iloc[-1] if not tsa_df.empty else np.nan
 
-    colA, colB, colC, colD, colE = st.columns([1.2,1.2,1.2,1.2,1.2])
-    colA.metric("National Tension Index", f"{tension}")
-    with colA.expander("How this is calculated"):
-        st.markdown(method_note("tension_index"))
-        # also show the live component audit:
-        comp = breakdown["components"]
-        st.markdown(
-            f"- **Components (latest · percentile · contribution · weight)**  \n"
-            f"  - Tone: `{comp['tone']['latest']:+.3f}` · `{comp['tone']['percentile']:.2f}` · `{comp['tone']['risk']:.1f}` · `{comp['tone']['weight']:.2f}`  \n"
-            f"  - Volume: `{comp['volume']['latest']:.0f}` · `{comp['volume']['percentile']:.2f}` · `{comp['volume']['risk']:.1f}` · `{comp['volume']['weight']:.2f}`  \n"
-            f"  - CISA: `{comp['cisa']['latest']:.0f}` · `{comp['cisa']['percentile']:.2f}` · `{comp['cisa']['risk']:.1f}` · `{comp['cisa']['weight']:.2f}`  \n"
-            f"  - FEMA: `{comp['fema']['latest']:.0f}` · `{comp['fema']['percentile']:.2f}` · `{comp['fema']['risk']:.1f}` · `{comp['fema']['weight']:.2f}`  \n"
-            f"  - VIX: `{comp['vix']['latest']:.2f}` · `{comp['vix']['percentile']:.2f}` · `{comp['vix']['risk']:.1f}` · `{comp['vix']['weight']:.2f}`  \n"
-            f"  - TSA Δ%: `{comp['tsa']['latest']:+.2f}` · `{comp['tsa']['percentile']:.2f}` · `{comp['tsa']['risk']:.1f}` · `{comp['tsa']['weight']:.2f}`"
-        )
+    m1, m2, m3, m4, m5 = st.columns([1.2,1.2,1.2,1.2,1.2])
+    with m1:
+        st.metric("National Tension Index", f"{_fmt(tension)}")
+        st.markdown("<div class='calc-note'>Percentile-weighted composite of tone, volume, CISA, FEMA, VIX, TSA.</div>", unsafe_allow_html=True)
+    with m2:
+        st.metric("VIX (Market Stress)", f"{_fmt(vix_val)}")
+        st.markdown("<div class='calc-note'>Latest ^VIX close (yfinance history).</div>", unsafe_allow_html=True)
+    with m3:
+        st.metric("Mobility Δ vs 2019", f"{_fmt(tsa_val)}%")
+        st.markdown("<div class='calc-note'>TSA 7-day avg vs 2019 7-day avg.</div>", unsafe_allow_html=True)
+    with m4:
+        st.metric("CISA Alerts (3d)", f"{_fmt(inputs.cisa_count_3d)}")
+        st.markdown("<div class='calc-note'>Count of advisories past 72h.</div>", unsafe_allow_html=True)
+    with m5:
+        st.metric("FEMA Declarations (14d)", f"{_fmt(inputs.fema_count_14d)}")
+        st.markdown("<div class='calc-note'>Sum of daily declarations over 14d.</div>", unsafe_allow_html=True)
 
-    colB.metric("VIX (Market Stress)", f"{market_snap.get('VIX','—')}")
-    with colB.expander("How this is calculated"):
-        st.markdown(method_note("vix_level"))
+    st.write("")  # thin spacer
 
-    if not tsa_df.empty:
-        colC.metric("Mobility Δ vs 2019", f"{tsa_df['delta_vs_2019_pct'].iloc[-1]:.1f}%")
-    else:
-        colC.metric("Mobility Δ vs 2019", "—")
-    with colC.expander("How this is calculated"):
-        st.markdown(method_note("tsa_delta"))
+    # -------- Body: 2 columns, left = intelligence, right = signals --------
+    left, right = st.columns([1.9, 1.2])
 
-    colD.metric("CISA Alerts (3d)", f"{inputs.cisa_count_3d}")
-    with colD.expander("How this is calculated"):
-        st.markdown(method_note("cisa_3d"))
-
-    colE.metric("FEMA Declarations (14d)", f"{inputs.fema_count_14d}")
-    with colE.expander("How this is calculated"):
-        st.markdown(method_note("fema_14d"))
-
-    # === LAYOUT: 3 COLUMNS ===
-    left, mid, right = st.columns([1.8, 1.6, 1.2])
-
-    # LEFT: Headlines + CISA
+    # LEFT — Situation + Headlines (no huge boxes, just clean cards)
     with left:
-        hlabel("Latest Headlines", badge="OSINT")
-        if news_df.empty:
-            st.info("No headlines at the moment.")
-        else:
-            st.dataframe(
-                news_df[["time","source","title"]],
-                use_container_width=True, hide_index=True,
-                column_config={"time": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm")}
-            )
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        _section_title("Situation Report")
+        # Build 3–6 concise points from available signals (no placeholders)
+        pts = []
+        comp = breakdown["components"]
+        if comp:
+            if comp["tone"]["risk"] >= 60: pts.append("Narrative tone is **unfavourable** vs its 2-week history.")
+            if comp["vix"]["risk"] >= 60: pts.append("Market stress (**VIX**) is elevated versus its 1-year range.")
+            if comp["tsa"]["risk"] >= 60: pts.append("Mobility is **below** 2019 baseline momentum.")
+            if inputs.cisa_count_3d > 0:  pts.append(f"{inputs.cisa_count_3d} CISA advisories in the past 72h.")
+            if inputs.fema_count_14d > 0: pts.append(f"{inputs.fema_count_14d} FEMA declarations in the past 14d.")
+        if not pts: pts = ["No abnormal signals detected across core indicators in the last 24–72 hours."]
+        for p in pts: st.markdown(f"- {p}")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        hlabel("CISA Advisories", badge="Cyber", badge_class="risk")
-        if cisa_df.empty:
-            st.info("No recent CISA advisories.")
-        else:
-            st.dataframe(cisa_df[["time","title"]], use_container_width=True, hide_index=True)
+        if headlines:
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            _section_title("Latest Headlines")
+            st.markdown("\n".join(headlines), unsafe_allow_html=True)
+            st.markdown("<div class='calc-note'>Feed: Google News (US edition). Times are approximate (UTC).</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    # MIDDLE: Markets, Mobility, GDELT Tone
-    with mid:
-            hlabel("Macro Pulse", badge="Markets")
-    if not market_hist.empty:
-        st.line_chart(market_hist[["S&P 500","Nasdaq 100"]].dropna(), use_container_width=True, height=180)
-        mom = market_momentum(market_hist)
-        st.caption(f"20-day momentum — S&P 500: {mom.get('S&P 500',0):+.2f}% | Nasdaq 100: {mom.get('Nasdaq 100',0):+.2f}%")
-
-        # ▼ ADD THIS EXPANDER RIGHT HERE ▼
-        with st.expander("How this is calculated — Momentum"):
-            from .methodology import method_note
-            st.markdown(method_note("market_momentum"))
-        # ▲ END INSERT ▲
-
-    else:
-        st.info("Awaiting market history.")
-
-
-        hlabel("Mobility — TSA Throughput (7-day avg)", badge="Activity")
-        if not tsa_df.empty:
-            st.line_chart(tsa_df[["current_7dma","baseline_7dma"]].rename(columns={"current_7dma":"Current","baseline_7dma":"2019 Baseline"}), height=180, use_container_width=True)
-            st.caption(f"Latest delta vs 2019: {tsa_df['delta_vs_2019_pct'].iloc[-1]:+.1f}%  |  7-day drift: {drift(tsa_df['current_7dma']):+.2f}%")
-        else:
-            st.info("TSA data unavailable right now.")
-
-            hlabel("News Tone (GDELT GKG)", badge="Narratives")
-    gkg = frames["gkg"]
-    if not gkg.empty:
-        tone_series = gkg.set_index("datetime")["tone"].resample("3H").mean().dropna().tail(120)
-        if not tone_series.empty:
-            st.line_chart(tone_series, use_container_width=True, height=160)
-            st.caption(f"Mean tone (last 48h): {tone_series.mean():+.2f}")
-
-            # ▼ ADD THIS EXPANDER RIGHT HERE ▼
-            with st.expander("How this is calculated — GDELT Tone"):
-                from .methodology import method_note
-                st.markdown(method_note("gdelt_tone"))
-            # ▲ END INSERT ▲
-
-        else:
-            st.info("Insufficient points for tone trend.")
-    else:
-        st.info("GDELT feed empty at the moment.")
-
-
-    # RIGHT: Strategic Brief + FEMA
+    # RIGHT — Macro & Activity signals (only show if we actually have data)
     with right:
-        hlabel("Strategic Brief", badge="HUMINT")
-        brief = strategic_brief(tension, news_df)
-        st.markdown(brief["summary"])
-        st.markdown("**Next Moves / Watchlist**")
-        for p in brief["next_steps"]:
-            st.markdown(f"- {p}")
+        if not market_hist.empty:
+            st.markdown("<div class='chart-card'>", unsafe_allow_html=True)
+            _section_title("Macro Pulse")
+            st.line_chart(market_hist[["S&P 500","Nasdaq 100"]].dropna(), use_container_width=True, height=160)
+            mom = market_momentum(market_hist)
+            st.markdown(f"<div class='small'>20-day momentum — S&P 500: {mom.get('S&P 500',0):+.2f}% · Nasdaq 100: {mom.get('Nasdaq 100',0):+.2f}%</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        hlabel("FEMA Declarations", badge="Gov")
-        if fema_df.empty:
-            st.info("No recent FEMA declarations in the last 14 days.")
-        else:
-            st.dataframe(fema_df[["time","state","type","title"]], use_container_width=True, hide_index=True)
+        if not tsa_df.empty:
+            st.markdown("<div class='chart-card'>", unsafe_allow_html=True)
+            _section_title("Mobility")
+            st.line_chart(tsa_df[["current_7dma","baseline_7dma"]].rename(columns={"current_7dma":"Current","baseline_7dma":"2019 Baseline"}), height=160, use_container_width=True)
+            st.markdown(f"<div class='small'>Latest Δ vs 2019: {tsa_df['delta_vs_2019_pct'].iloc[-1]:+.1f}%</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # Small vertical list: recent government items (when available)
+        if not frames.get("cisa", pd.DataFrame()).empty:
+            st.markdown("<div class='card note-card'>", unsafe_allow_html=True)
+            _section_title("CISA Advisories")
+            st.dataframe(frames["cisa"][["time","count"]], use_container_width=True, hide_index=True,
+                         column_config={"time": st.column_config.DatetimeColumn(format="YYYY-MM-DD")}, height=140)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        if not frames.get("fema", pd.DataFrame()).empty:
+            st.markdown("<div class='card note-card'>", unsafe_allow_html=True)
+            _section_title("FEMA Declarations")
+            st.dataframe(frames["fema"][["time","count"]], use_container_width=True, hide_index=True,
+                         column_config={"time": st.column_config.DatetimeColumn(format="YYYY-MM-DD")}, height=140)
+            st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<hr/>", unsafe_allow_html=True)
     st.caption("Sources: Google News (RSS), GDELT GKG v2, TSA Passenger Volumes, CISA Advisories, FEMA OpenFEMA, yfinance indices.")
