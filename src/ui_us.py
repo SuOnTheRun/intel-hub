@@ -1,4 +1,5 @@
 # src/ui_us.py
+from __future__ import annotations
 from .narratives import strategist_playbook
 from __future__ import annotations
 import streamlit as st
@@ -11,6 +12,7 @@ from .collectors import (
     fetch_latest_news, fetch_tsa_throughput, fetch_market_snapshot,
 )
 from .risk_model import compute_inputs, compute_tension_index, tension_breakdown, market_momentum
+from .narratives import strategist_playbook
 
 def _fmt(x):
     if x is None or (isinstance(x, float) and np.isnan(x)): return "—"
