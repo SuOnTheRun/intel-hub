@@ -116,27 +116,35 @@ def fetch_tsa_throughput() -> pd.DataFrame:
     cur["delta_vs_2019_pct"] = ((cur["current_7dma"] - cur["baseline_7dma"]) / cur["baseline_7dma"]) * 100
     return cur.tail(210).reset_index(drop=True)
 
-# --------- MARKETS via yfinance (no key)
+# --------- MARKETS via yfinance (history only; robust) ---------
 _TICKERS = {
     "S&P 500": "^GSPC",
     "Nasdaq 100": "^NDX",
     "VIX": "^VIX",
-    "10Y": "^TNX",  # CBOE 10Y yield index (approx)
+    "10Y": "^TNX",  # CBOE 10Y yield index
 }
 
-def fetch_market_snapshot() -> Tuple[Dict[str, float], pd.DataFrame]:
-    data = {}
-    hist_frames = []
-    for name, t in _TICKERS.items():
-        tk = yf.Ticker(t)
+def fetch_market_snapshot() -> tuple[dict, pd.DataFrame]:
+    """
+    Uses only historical closes (no .info/.fast_info) to avoid API quirks.
+    Returns (latest_price_by_name, history_df).
+    """
+    data: dict[str, float] = {}
+    frames: list[pd.Series] = []
+    for name, symbol in _TICKERS.items():
         try:
-            price = float(tk.info.get("regularMarketPrice") or tk.fast_info.last_price)
+            h = yf.download(symbol, period="6mo", interval="1d", auto_adjust=False, progress=False)
+            if h.empty:
+                data[name] = float("nan")
+                frames.append(pd.Series(dtype=float, name=name))
+                continue
+            close = h["Close"].dropna()
+            data[name] = float(close.iloc[-1])
+            frames.append(close.rename(name))
         except Exception:
-            price = np.nan
-        data[name] = price
-        h = tk.history(period="3mo", interval="1d")["Close"].rename(name)
-        hist_frames.append(h)
-    hist = pd.concat(hist_frames, axis=1)
+            data[name] = float("nan")
+            frames.append(pd.Series(dtype=float, name=name))
+    hist = pd.concat(frames, axis=1)
     return data, hist
 
 # --------- CISA Alerts RSS (no key)
