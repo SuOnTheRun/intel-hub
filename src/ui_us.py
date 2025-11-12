@@ -152,6 +152,34 @@ def render():
             st.dataframe(frames["fema"][["time","count"]], use_container_width=True, hide_index=True,
                          column_config={"time": st.column_config.DatetimeColumn(format="YYYY-MM-DD")}, height=140)
             st.markdown("</div>", unsafe_allow_html=True)
+    # --- Strategist Playbook (clean header, two compact cards) ---
+    st.markdown("<h3 class='section-title'>Strategist Playbook</h3>", unsafe_allow_html=True)
+
+    pb = strategist_playbook(breakdown, market_hist, tsa_df, news_df)
+
+    # Marketing posture
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("**Marketing posture**", unsafe_allow_html=True)
+    if pb["marketing"]:
+        for b in pb["marketing"]:
+            st.markdown(f"- {b}")
+    else:
+        st.markdown("- No posture changes suggested by today’s signals.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Insight watchlist
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("**Insight watchlist**", unsafe_allow_html=True)
+    for b in pb["insight"]:
+        st.markdown(f"- {b}")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Emerging topics (from real headlines)
+    if pb["topics"]:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**Emerging topics (headlines)**", unsafe_allow_html=True)
+        st.markdown("\n".join(pb["topics"]), unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<hr/>", unsafe_allow_html=True)
     st.caption("Sources: Google News (RSS), GDELT GKG v2, TSA Passenger Volumes, CISA Advisories, FEMA OpenFEMA, yfinance indices.")
