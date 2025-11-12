@@ -334,3 +334,52 @@ def market_momentum(hist: pd.DataFrame) -> Dict[str, float]:
         mom = (s.iloc[-1] / s.rolling(20).mean().iloc[-1] - 1) * 100
         out[col] = float(round(mom, 2))
     return out
+# --- add to src/risk_model.py (near the bottom) ---
+
+def tension_breakdown() -> dict:
+    """
+    Returns a full audit record for today's Tension Index:
+      {
+        'index': <float 0..100>,
+        'components': {
+           'tone': {'latest': float, 'percentile': float, 'risk': float, 'weight': float},
+           'volume': {...}, 'cisa': {...}, 'fema': {...}, 'vix': {...}, 'tsa': {...}
+        }
+      }
+    All percentiles are in [0,1]. Risk contributions are 0..100 after direction mapping.
+    """
+    series = build_component_series()
+    gd, cisa, fema, vix, tsa = series["gdelt"], series["cisa"], series["fema"], series["vix"], series["tsa"]
+
+    def latest(s): 
+        try:
+            return float(pd.Series(s).dropna().iloc[-1])
+        except Exception:
+            return float("nan")
+
+    # latest values
+    tone_today = latest(gd["tone_mean"]) if not gd.empty else float("nan")
+    vol_today  = latest(gd["doc_count"]) if not gd.empty else float("nan")
+    cisa_today = latest(cisa)
+    fema_today = latest(fema)
+    vix_today  = latest(vix)
+    tsa_today  = latest(tsa)
+
+    # percentiles
+    tone_pct = _percentile_rank(gd["tone_mean"], tone_today) if not np.isnan(tone_today) else 0.5
+    vol_pct  = _percentile_rank(gd["doc_count"], vol_today)  if not np.isnan(vol_today)  else 0.5
+    cisa_pct = _percentile_rank(cisa, cisa_today)            if not np.isnan(cisa_today) else 0.5
+    fema_pct = _percentile_rank(fema, fema_today)            if not np.isnan(fema_today) else 0.5
+    vix_pct  = _percentile_rank(vix, vix_today)              if not np.isnan(vix_today)  else 0.5
+    tsa_pct  = _percentile_rank(tsa, tsa_today)              if not np.isnan(tsa_today)  else 0.5
+
+    comp = {
+        "tone":   {"latest": tone_today, "percentile": tone_pct, "risk": 100*(1-tone_pct), "weight": .30},
+        "volume": {"latest": vol_today,  "percentile": vol_pct,  "risk": 100*(vol_pct),     "weight": .10},
+        "cisa":   {"latest": cisa_today, "percentile": cisa_pct, "risk": 100*(cisa_pct),    "weight": .15},
+        "fema":   {"latest": fema_today, "percentile": fema_pct, "risk": 100*(fema_pct),    "weight": .10},
+        "vix":    {"latest": vix_today,  "percentile": vix_pct,  "risk": 100*(vix_pct),     "weight": .25},
+        "tsa":    {"latest": tsa_today,  "percentile": tsa_pct,  "risk": 100*(1-tsa_pct),   "weight": .10},
+    }
+    idx = round(sum(v["risk"]*v["weight"] for v in comp.values()) / sum(v["weight"] for v in comp.values()), 2)
+    return {"index": idx, "components": comp}
