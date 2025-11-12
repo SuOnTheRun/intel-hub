@@ -99,22 +99,33 @@ def fetch_gdelt_gkg_last_n_days(n_days: int = 2) -> pd.DataFrame:
 # --------- TSA CHECKPOINT THROUGHPUT (no key)
 def fetch_tsa_throughput() -> pd.DataFrame:
     """
-    Official TSA CSV: https://www.tsa.gov/travel/passenger-volumes
-    Provides date and throughput for 2019 and current years.
+    Official TSA CSV. Returns an empty DataFrame on any HTTP/parse failure.
     """
     url = "https://www.tsa.gov/sites/default/files/tsacheckpointtravelnumbers.csv"
-    r = _http_get(url)
-    df = pd.read_csv(io.StringIO(r.text))
+    try:
+        r = _http_get(url)
+        r.raise_for_status()
+        df = pd.read_csv(io.StringIO(r.text))
+    except Exception:
+        return pd.DataFrame(columns=["date","current","baseline_2019","current_7dma","baseline_7dma","delta_vs_2019_pct"])
+
     df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-    # keep last 180 days; compute 7d avg and baseline vs 2019
-    df["date"] = pd.to_datetime(df["date"], utc=True)
-    df = df.sort_values("date")
-    today_year = df["date"].dt.year.max()
+    df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
+    df = df.dropna(subset=["date"]).sort_values("date")
+    if df.empty:
+        return pd.DataFrame(columns=["date","current","baseline_2019","current_7dma","baseline_7dma","delta_vs_2019_pct"])
+
+    today_year = int(df["date"].dt.year.max())
     cur = df.rename(columns={str(today_year): "current", "2019": "baseline_2019"})
-    cur["current_7dma"] = cur["current"].rolling(7).mean()
-    cur["baseline_7dma"] = cur["baseline_2019"].rolling(7).mean()
-    cur["delta_vs_2019_pct"] = ((cur["current_7dma"] - cur["baseline_7dma"]) / cur["baseline_7dma"]) * 100
+    for col in ("current","baseline_2019"):
+        if col not in cur.columns:
+            cur[col] = np.nan
+    cur["current_7dma"] = cur["current"].rolling(7, min_periods=1).mean()
+    cur["baseline_7dma"] = cur["baseline_2019"].rolling(7, min_periods=1).mean()
+    denom = cur["baseline_7dma"].replace(0, np.nan)
+    cur["delta_vs_2019_pct"] = ((cur["current_7dma"] - cur["baseline_7dma"]) / denom) * 100
     return cur.tail(210).reset_index(drop=True)
+
 
 # --------- MARKETS via yfinance (history only; robust) ---------
 _TICKERS = {
@@ -125,19 +136,13 @@ _TICKERS = {
 }
 
 def fetch_market_snapshot() -> tuple[dict, pd.DataFrame]:
-    """
-    Uses only historical closes (no .info/.fast_info) to avoid API quirks.
-    Returns (latest_price_by_name, history_df).
-    """
     data: dict[str, float] = {}
     frames: list[pd.Series] = []
     for name, symbol in _TICKERS.items():
         try:
             h = yf.download(symbol, period="6mo", interval="1d", auto_adjust=False, progress=False)
             if h.empty:
-                data[name] = float("nan")
-                frames.append(pd.Series(dtype=float, name=name))
-                continue
+                raise RuntimeError("empty history")
             close = h["Close"].dropna()
             data[name] = float(close.iloc[-1])
             frames.append(close.rename(name))
@@ -147,25 +152,34 @@ def fetch_market_snapshot() -> tuple[dict, pd.DataFrame]:
     hist = pd.concat(frames, axis=1)
     return data, hist
 
+
 # --------- CISA Alerts RSS (no key)
 def fetch_cisa_alerts(limit: int = 30) -> pd.DataFrame:
     url = "https://www.cisa.gov/cybersecurity-advisories/all.xml"
-    feed = feedparser.parse(url)
+    try:
+        feed = feedparser.parse(url)
+        entries = feed.entries
+    except Exception:
+        entries = []
     rows = []
-    for e in feed.entries[:limit]:
+    for e in entries[:limit]:
         rows.append({
             "time": _to_dt(getattr(e,"published",None)) or _now(),
-            "title": e.title,
-            "link": e.link,
+            "title": getattr(e, "title", ""),
+            "link": getattr(e, "link", ""),
         })
+    if not rows:
+        return pd.DataFrame(columns=["time","title","link"])
     return pd.DataFrame(rows).sort_values("time", ascending=False).reset_index(drop=True)
 
 # --------- FEMA Disaster Declarations (no key)
 def fetch_fema_disasters(limit: int = 50) -> pd.DataFrame:
-    # OpenFEMA API
     url = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?$orderby=declarationDate%20desc&$top=100"
-    r = _http_get(url)
-    js = r.json().get("DisasterDeclarationsSummaries", [])
+    try:
+        r = _http_get(url)
+        js = r.json().get("DisasterDeclarationsSummaries", [])
+    except Exception:
+        js = []
     rows = []
     for x in js[:limit]:
         rows.append({
@@ -175,4 +189,6 @@ def fetch_fema_disasters(limit: int = 50) -> pd.DataFrame:
             "title": f"{x.get('incidentType')} — {x.get('declarationTitle','')}".strip(),
             "link": f"https://www.fema.gov/disaster/{x.get('disasterNumber')}"
         })
+    if not rows:
+        return pd.DataFrame(columns=["time","state","type","title","link"])
     return pd.DataFrame(rows).dropna(subset=["time"]).sort_values("time", ascending=False).reset_index(drop=True)
