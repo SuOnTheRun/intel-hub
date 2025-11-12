@@ -27,17 +27,46 @@ def render():
     fema_df = frames["fema"]
 
     # === METRIC DECK ===
+    from .methodology import method_note
+    from .risk_model import tension_breakdown
+
+    breakdown = tension_breakdown()
+    tension = breakdown["index"]
+
     colA, colB, colC, colD, colE = st.columns([1.2,1.2,1.2,1.2,1.2])
     colA.metric("National Tension Index", f"{tension}")
+    with colA.expander("How this is calculated"):
+        st.markdown(method_note("tension_index"))
+        # also show the live component audit:
+        comp = breakdown["components"]
+        st.markdown(
+            f"- **Components (latest · percentile · contribution · weight)**  \n"
+            f"  - Tone: `{comp['tone']['latest']:+.3f}` · `{comp['tone']['percentile']:.2f}` · `{comp['tone']['risk']:.1f}` · `{comp['tone']['weight']:.2f}`  \n"
+            f"  - Volume: `{comp['volume']['latest']:.0f}` · `{comp['volume']['percentile']:.2f}` · `{comp['volume']['risk']:.1f}` · `{comp['volume']['weight']:.2f}`  \n"
+            f"  - CISA: `{comp['cisa']['latest']:.0f}` · `{comp['cisa']['percentile']:.2f}` · `{comp['cisa']['risk']:.1f}` · `{comp['cisa']['weight']:.2f}`  \n"
+            f"  - FEMA: `{comp['fema']['latest']:.0f}` · `{comp['fema']['percentile']:.2f}` · `{comp['fema']['risk']:.1f}` · `{comp['fema']['weight']:.2f}`  \n"
+            f"  - VIX: `{comp['vix']['latest']:.2f}` · `{comp['vix']['percentile']:.2f}` · `{comp['vix']['risk']:.1f}` · `{comp['vix']['weight']:.2f}`  \n"
+            f"  - TSA Δ%: `{comp['tsa']['latest']:+.2f}` · `{comp['tsa']['percentile']:.2f}` · `{comp['tsa']['risk']:.1f}` · `{comp['tsa']['weight']:.2f}`"
+        )
+
     colB.metric("VIX (Market Stress)", f"{market_snap.get('VIX','—')}")
+    with colB.expander("How this is calculated"):
+        st.markdown(method_note("vix_level"))
+
     if not tsa_df.empty:
         colC.metric("Mobility Δ vs 2019", f"{tsa_df['delta_vs_2019_pct'].iloc[-1]:.1f}%")
     else:
         colC.metric("Mobility Δ vs 2019", "—")
-    colD.metric("CISA Alerts (3d)", f"{inputs.cisa_count_3d}")
-    colE.metric("FEMA Declarations (14d)", f"{inputs.fema_count_14d}")
+    with colC.expander("How this is calculated"):
+        st.markdown(method_note("tsa_delta"))
 
-    st.markdown("<hr/>", unsafe_allow_html=True)
+    colD.metric("CISA Alerts (3d)", f"{inputs.cisa_count_3d}")
+    with colD.expander("How this is calculated"):
+        st.markdown(method_note("cisa_3d"))
+
+    colE.metric("FEMA Declarations (14d)", f"{inputs.fema_count_14d}")
+    with colE.expander("How this is calculated"):
+        st.markdown(method_note("fema_14d"))
 
     # === LAYOUT: 3 COLUMNS ===
     left, mid, right = st.columns([1.8, 1.6, 1.2])
