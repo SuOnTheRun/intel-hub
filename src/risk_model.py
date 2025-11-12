@@ -219,6 +219,17 @@ class RiskInputs:
     vix_level: float
     tsa_delta_pct: float
 
+# --- timezone-safe index normaliser (module-level helper) ---
+def _as_utc_index(idx) -> pd.DatetimeIndex:
+    """
+    Return a UTC DatetimeIndex whether the incoming index is tz-naive or tz-aware.
+    Must be defined at module level (no indentation).
+    """
+    idx = pd.to_datetime(idx, errors="coerce")
+    if getattr(idx, "tz", None) is None:
+        return idx.tz_localize("UTC")
+    return idx.tz_convert("UTC")
+
 
 def compute_inputs() -> Tuple[RiskInputs, Dict[str, pd.DataFrame]]:
     """
@@ -254,18 +265,17 @@ def compute_inputs() -> Tuple[RiskInputs, Dict[str, pd.DataFrame]]:
     return idx.tz_localize("UTC") if getattr(idx, "tz", None) is None else idx.tz_convert("UTC")
 
 frames = {
-    "gkg": fetch_gdelt_gkg_last_n_days(2),  # near-real-time table for UI
-    "cisa": pd.DataFrame({
-        "time": _as_utc_index(cisa.index),
-        "count": cisa.values
-    }).sort_values("time", ascending=False).head(30),
-    "fema": pd.DataFrame({
-        "time": _as_utc_index(fema.index),
-        "count": fema.values
-    }).sort_values("time", ascending=False).head(30),
+    "gkg": fetch_gdelt_gkg_last_n_days(2),
+    "cisa": pd.DataFrame(
+        {"time": _as_utc_index(cisa.index), "count": cisa.values}
+    ).sort_values("time", ascending=False).head(30),
+    "fema": pd.DataFrame(
+        {"time": _as_utc_index(fema.index), "count": fema.values}
+    ).sort_values("time", ascending=False).head(30),
     "tsa": fetch_tsa_throughput(),
     "market_hist": fetch_market_snapshot()[1],
 }
+
 
 
 
