@@ -131,7 +131,6 @@ def _fema_daily() -> pd.Series:
     base = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
     url = f"{base}?$orderby=declarationDate%20desc&$top=500"
     from .collectors import _http_get  # reuse client
-    import requests
 
     for _ in range(3):
         try:
@@ -146,12 +145,13 @@ def _fema_daily() -> pd.Series:
 
         # Stop when we’ve covered ~90 days. NOTE: to_datetime(..., utc=True) is tz-aware.
         last_date = pd.to_datetime(df["declarationDate"], utc=True).min()
-        # pd.Timestamp.utcnow() is already tz-aware; don't tz_localize, just compare.
+        # pd.Timestamp.utcnow() is already tz-aware; don't tz_localize.
         if (pd.Timestamp.utcnow() - last_date) > pd.Timedelta(days=95):
             break
 
     if not rows:
-        idx = pd.date_range(pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=89), periods=90, freq="D", tz="UTC")
+        idx = pd.date_range(pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=89),
+                            periods=90, freq="D", tz="UTC")
         return pd.Series(index=idx, data=np.nan, name="fema_count")
 
     all_df = pd.concat(rows, ignore_index=True)
@@ -249,20 +249,24 @@ def compute_inputs() -> Tuple[RiskInputs, Dict[str, pd.DataFrame]]:
         tsa_delta_pct=0.0 if np.isnan(tsa_delta) else tsa_delta,
     )
     # Also hand back frames needed by the UI
-    frames = {
-        "gkg": fetch_gdelt_gkg_last_n_days(2),  # keep the UI's near-real-time table
-        "cisa": pd.DataFrame({
-            "time": pd.to_datetime(cisa.index).tz_localize("UTC"),
-            "count": cisa.values
-        }).sort_values("time", ascending=False).head(30),
-        "fema": pd.DataFrame({
-            "time": pd.to_datetime(fema.index).tz_localize("UTC"),
-            "count": fema.values
-        }).sort_values("time", ascending=False).head(30),
-        "tsa": fetch_tsa_throughput(),
-        "market_hist": fetch_market_snapshot()[1],
-    }
-    return inputs, frames
+   def _as_utc_index(idx) -> pd.DatetimeIndex:
+    idx = pd.to_datetime(idx, errors="coerce")
+    return idx.tz_localize("UTC") if getattr(idx, "tz", None) is None else idx.tz_convert("UTC")
+
+frames = {
+    "gkg": fetch_gdelt_gkg_last_n_days(2),  # near-real-time table for UI
+    "cisa": pd.DataFrame({
+        "time": _as_utc_index(cisa.index),
+        "count": cisa.values
+    }).sort_values("time", ascending=False).head(30),
+    "fema": pd.DataFrame({
+        "time": _as_utc_index(fema.index),
+        "count": fema.values
+    }).sort_values("time", ascending=False).head(30),
+    "tsa": fetch_tsa_throughput(),
+    "market_hist": fetch_market_snapshot()[1],
+}
+
 
 
 # --------------------------------------------------
