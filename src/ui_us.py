@@ -15,8 +15,24 @@ from .narratives import strategic_brief
 def render():
     set_dark_theme()
     st.title("United States — Intelligence Command Center")
-    st.write("")  # subtle spacer to separate the title from the first card row
-    st.caption("Live OSINT / HUMINT | Situational Awareness & Early Warning")
+    st.caption("Live OSINT | HUMINT | Situational Awareness & Early Warning")
+
+    # Guarded data pulls
+    try:
+        inputs, frames = compute_inputs()
+    except Exception:
+        inputs = type("Obj", (), dict(
+            cisa_count_3d=0, fema_count_14d=0, gdelt_count=0,
+            gdelt_tone_mean=0.0, vix_level=0.0, tsa_delta_pct=0.0
+        ))()
+        frames = {"gkg": pd.DataFrame(), "cisa": pd.DataFrame(), "fema": pd.DataFrame(),
+                  "tsa": pd.DataFrame(), "market_hist": pd.DataFrame()}
+
+    try:
+        market_snap, market_hist = fetch_market_snapshot()
+    except Exception:
+        market_snap, market_hist = ({}, pd.DataFrame())
+
 
     # === DATA PULLS (shielded) ===
     try:
