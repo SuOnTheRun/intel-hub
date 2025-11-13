@@ -123,8 +123,9 @@ def render():
 
     left, right = st.columns([1.8, 1.25])
 
-    # LEFT — Situation + Headlines + Per-state topics
+    # LEFT — Situation + Sentiment + Headlines + Per-state topics
     with left:
+        # --- Situation Brief ---
         st.markdown("<div class='card'>", unsafe_allow_html=True)
         _section_title("Situation Brief")
         pts = []
@@ -136,9 +137,9 @@ def render():
         if comp.get("tsa", {}).get("risk", 0) >= 60:
             pts.append("Mobility momentum sits **below** the 2019 baseline.")
         if inputs.cisa_count_3d > 0:
-            pts.append(f"{inputs.cisa_count_3d} CISA advisories in the last 72h.")
+            pts.append(f"{inputs.cisa_count_3d} CISA advisories in the last 72 h.")
         if inputs.fema_count_14d > 0:
-            pts.append(f"{inputs.fema_count_14d} FEMA declarations in the last 14d.")
+            pts.append(f"{inputs.fema_count_14d} FEMA declarations in the last 14 d.")
         if isinstance(vix_val, float) and not np.isnan(vix_val):
             band = "low" if vix_val < 15 else "mid" if vix_val < 22 else "high"
             pts.append(f"VIX at **{vix_val:.1f}** ({band}).")
@@ -147,9 +148,31 @@ def render():
             pts.append(f"Mobility vs 2019: **{tsa_val:+.1f}%** ({sign}).")
         if not pts:
             pts = ["Core indicators stable in the last 24–72 hours."]
-        for p in pts: st.markdown(f"- {p}")
+        for p in pts:
+            st.markdown(f"- {p}")
         st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- Consumer Sentiment ---
+        from .sentiment_model import compute_sentiment, sentiment_change
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        _section_title("Consumer Sentiment")
+        try:
+            current_sent = compute_sentiment(news_df)
+            avg_sent = current_sent["avg"]
+            # assume we keep 7-day archive file locally; otherwise reuse news_df for demo
+            prev_sent = sentiment_change(news_df, news_df.iloc[int(len(news_df)/2):])
+            delta = "—"
+            if not np.isnan(prev_sent):
+                delta = f"{'+' if prev_sent>=0 else ''}{prev_sent*100:.1f} bps"
+            st.metric("Sentiment Index (today)", f"{avg_sent*100:.1f}", delta)
+            if not current_sent["hist"].empty:
+                st.line_chart(current_sent["hist"].rolling(5).mean(), height=120, use_container_width=True)
+            st.caption("Headline-level polarity from national news (TextBlob).")
+        except Exception as e:
+            st.info("Sentiment data not available.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- Latest Headlines ---
         if headlines_md:
             st.markdown("<div class='card'>", unsafe_allow_html=True)
             _section_title("Latest Headlines (US)")
@@ -157,7 +180,7 @@ def render():
             st.caption("Google News (US edition). Times approximate (UTC).")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # Per-state topic snippets (from headlines text)
+        # --- Per-state topics (from headlines text) ---
         from .narratives import strategist_playbook as _pb
         pb_preview = _pb(breakdown, market_hist, tsa_df, news_df)
         if pb_preview.get("topics_by_state"):
