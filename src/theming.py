@@ -1,65 +1,61 @@
 # src/theming.py
+from __future__ import annotations
 import streamlit as st
 
-QUIET_LUXURY_CSS = """
+_LIGHT_CSS = """
 <style>
-:root {
-  --bg:#0d0f12; --panel:#15181c; --soft:#1a1e23; --ink:#e7e9ee; --muted:#9aa3ad;
-  --accent:#e0c078; --accent-2:#86b4e6; --success:#68c3a7; --warn:#e3b36f; --risk:#ef6e6e;
-  --r:8px; --shadow:0 8px 22px rgba(0,0,0,.30);
-}
-/* Base */
-html, body, .stApp {background:var(--bg); color:var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;}
-.block-container {max-width:1200px; padding-top: 1.0rem;}
-h1 {font-weight:800; margin:.2rem 0 .8rem;}
-h2,h3 {font-weight:700;}
-hr {border:0; height:1px; background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent); margin:0.8rem 0;}
-
-/* Executive-minimal cards: small radius, subtle borders, less shadow */
-.card, [data-testid="stDataFrame"], [data-testid="stMetric"], .chart-card, .note-card {
-  background: var(--panel); border-radius: var(--r); border:1px solid rgba(255,255,255,.07); box-shadow: var(--shadow);
-  padding: 12px 14px;
-}
-/* IMPORTANT: do NOT style all Markdown containers as cards */
-
-[data-testid="stMetric"] { background: var(--soft); }
-div[data-testid="stMetricValue"] { color: var(--accent); font-weight:800; }
-
-/* Remove “bubble” feel */
-.sidebar .block-container, .stSidebar .block-container { padding: .5rem .5rem 1rem; }
-.stSidebar [data-testid="stRadio"] { background: var(--panel); border:1px solid rgba(255,255,255,.07); border-radius: var(--r); padding:10px 12px; box-shadow: var(--shadow); }
-.stSidebar [data-testid="stHeader"] { background: transparent; border:0; box-shadow:none; }
-
-/* Tables */
-thead tr th {background: var(--soft)!important; color: var(--ink)!important;}
-tbody tr:nth-child(odd) {background: rgba(255,255,255,.02)!important;}
-
-/* Links */
-a {color: var(--accent-2); text-decoration: none;} a:hover {text-decoration: underline;}
-
-/* Notes */
-.calc-note { color: var(--muted); font-size:.85rem; line-height:1.25rem; margin-top:.25rem; }
-.small { font-size:.86rem; color: var(--muted); }
-.section-title { margin-bottom:.2rem; }
-.section-head { font-weight:700; margin:.1rem 0 .4rem; letter-spacing:.2px; }
-.section-head:after {
-  content:""; display:block; height:1px; margin-top:6px;
-  background: linear-gradient(90deg, var(--accent) 0%, rgba(255,255,255,.12) 40%, transparent 80%);
-  opacity:.55;
+:root{
+  --bg:#f7f7f8;
+  --panel:#ffffff;
+  --ink:#0f172a;
+  --muted:#64748b;
+  --border:#e6e7eb;
+  --accent:#1f6feb;        /* soft blue accent */
+  --accent-2:#f0f7ff;      /* pale blue fill */
+  --success:#0f766e;
+  --warn:#b45309;
 }
 
+html, body, .stApp { background: var(--bg) !important; color: var(--ink); }
+section[data-testid="stSidebar"] { background: #fafafa !important; border-right:1px solid var(--border); }
+
+.block-container { padding-top: 2rem; }
+
+h1, h2, h3, h4 { color: var(--ink); letter-spacing: .2px; }
+h1 { font-weight: 800; }
+.section-title { margin: .25rem 0 1rem 0; font-weight: 750; }
+
+.stMetric { background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 10px 14px; box-shadow: 0 1px 2px rgba(16,24,40,.05);
+}
+.stMetric label, .stMetric [data-testid="stMetricLabel"] { color: var(--muted) !important; font-weight: 600; }
+.stMetric span { color: var(--ink) !important; font-weight: 800 !important; }
+
+.card, .note-card, .chart-card {
+  background: var(--panel); border:1px solid var(--border); border-radius:16px;
+  padding:14px 16px; margin: 6px 0 14px 0; box-shadow: 0 1px 2px rgba(16,24,40,.05);
+}
+.chart-card { padding-top: 8px; }
+.note-card { background: #fff; }
+
+.calc-note, .small, .stCaption { color: var(--muted) !important; font-size: .85rem; }
+.calc-note { margin-top: 6px; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+[data-testid="stTable"] table, .stDataFrame { border-radius: 10px; border:1px solid var(--border); }
+[data-testid="stTable"] thead tr th, .stDataFrame thead tr th { background: #fafcff; color: #334155; }
+
+hr { border: none; height:1px; background: var(--border); margin: 20px 0; }
+
+.badge { background: var(--accent-2); color: var(--accent); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 </style>
 """
 
+def set_dark_theme():
+    """Kept for compatibility; we now prefer light."""
+    st.markdown(_LIGHT_CSS, unsafe_allow_html=True)
 
-
-def set_dark_theme() -> None:
-    """Injects the quiet-luxury dark theme."""
-    st.markdown(QUIET_LUXURY_CSS, unsafe_allow_html=True)
-
-def hlabel(text: str, badge: str | None = None, badge_class: str = "") -> None:
-    """Section header with optional badge."""
-    if badge:
-        st.markdown(f"### {text} <span class='badge {badge_class}'>{badge}</span>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"### {text}")
+def set_light_theme():
+    st.markdown(_LIGHT_CSS, unsafe_allow_html=True)
