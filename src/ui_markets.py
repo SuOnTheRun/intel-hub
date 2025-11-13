@@ -1,39 +1,40 @@
 # src/ui_markets.py
+from __future__ import annotations
 import streamlit as st
 import pandas as pd
-from .theming import set_dark_theme
+import numpy as np
+
+from .theming import set_light_theme
 from .collectors import fetch_market_snapshot
+from .risk_model import market_momentum
 
 def render():
-    set_dark_theme()
-    st.title("Markets & Macro — Strategy Lens")
-    st.caption("Translate market & economic conditions into advertising strategy.")
+    set_light_theme()
+    st.title("United States — Markets & Macro")
 
-    snap, idx = fetch_market_snapshot()  # uses yfinance, free
+    snap, hist = ({}, pd.DataFrame())
+    try:
+        snap, hist = fetch_market_snapshot()
+    except Exception:
+        pass
 
-    left, right = st.columns([1.6, 1.2])
+    c1, c2, c3 = st.columns([1.1,1.1,1.1])
+    with c1:
+        st.metric("S&P 500 (close)", f"{snap.get('S&P 500', '—')}")
+    with c2:
+        st.metric("Nasdaq 100 (close)", f"{snap.get('Nasdaq 100', '—')}")
+    with c3:
+        st.metric("VIX (close)", f"{snap.get('VIX', '—')}")
 
-    with left:
-        if isinstance(idx, pd.DataFrame) and not idx.empty:
-            st.subheader("Index performance")
-            plot_df = idx[["S&P 500","Nasdaq 100"]].dropna()
-            st.line_chart(plot_df, use_container_width=True, height=220)
-            # Simple regime hint: 50/200 cross
-            spx = plot_df["S&P 500"].dropna()
-            ma50 = spx.rolling(50).mean()
-            ma200 = spx.rolling(200).mean()
-            if len(ma200.dropna()):
-                regime = "Uptrend (50>200)" if ma50.iloc[-1] > ma200.iloc[-1] else "Downtrend (50<200)"
-                implication = ("Favour performance/scale tests; broaden reach in growth contexts."
-                               if regime.startswith("Uptrend") else
-                               "Tighten efficiency targets; emphasise value framing and brand safety.")
-                st.markdown(f"**Regime:** {regime} · **Implication:** {implication}")
+    if not hist.empty:
+        st.markdown("<div class='chart-card'>", unsafe_allow_html=True)
+        st.subheader("Equity Indices")
+        st.line_chart(hist[["S&P 500","Nasdaq 100"]].dropna(), use_container_width=True, height=260)
+        mom = market_momentum(hist)
+        st.caption(f"20-day momentum — S&P 500: {mom.get('S&P 500',0):+.2f}% · Nasdaq 100: {mom.get('Nasdaq 100',0):+.2f}%")
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.info("Market history unavailable right now.")
 
-    with right:
-        if isinstance(snap, dict) and snap:
-            st.subheader("Snapshot")
-            rows = [f"- **{k}**: {v:.2f}" for k, v in snap.items()]
-            st.markdown("\n".join(rows))
-
-    st.markdown("---")
-    st.caption("Sources: yfinance (^GSPC, ^NDX, ^VIX). Regime via S&P 500 50/200 DMA cross (informative, not advice).")
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    st.caption("Sources: yfinance (indices).")
