@@ -10,6 +10,17 @@ import requests
 import requests_cache
 import feedparser
 import yfinance as yf
+# yfinance-backed index fetch (robust for VIX)
+
+def _last_close(ticker: str) -> float | None:
+    try:
+        hist = yf.Ticker(ticker).history(period="7d", interval="1d", auto_adjust=False)
+        if hist is None or hist.empty:
+            return None
+        return float(hist["Close"].dropna().iloc[-1])
+    except Exception:
+        return None
+
 
 # A single shared cache for all HTTP calls (SQLite on disk).
 requests_cache.install_cache(
@@ -135,22 +146,33 @@ _TICKERS = {
     "10Y": "^TNX",  # CBOE 10Y yield index
 }
 
-def fetch_market_snapshot() -> tuple[dict, pd.DataFrame]:
-    data: dict[str, float] = {}
-    frames: list[pd.Series] = []
-    for name, symbol in _TICKERS.items():
-        try:
-            h = yf.download(symbol, period="6mo", interval="1d", auto_adjust=False, progress=False)
-            if h.empty:
-                raise RuntimeError("empty history")
-            close = h["Close"].dropna()
-            data[name] = float(close.iloc[-1])
-            frames.append(close.rename(name))
-        except Exception:
-            data[name] = float("nan")
-            frames.append(pd.Series(dtype=float, name=name))
-    hist = pd.concat(frames, axis=1)
-    return data, hist
+def fetch_market_snapshot():
+    """
+    Returns (snap, hist)
+      snap: dict with keys like 'VIX','S&P 500','Nasdaq 100'
+      hist: DataFrame of index closes for simple charts/momentum
+    """
+    snap = {}
+    # ^VIX, ^GSPC (S&P 500), ^NDX (Nasdaq 100)
+    vix = _last_close("^VIX")
+    spx = _last_close("^GSPC")
+    ndx = _last_close("^NDX")
+    if vix is not None: snap["VIX"] = vix
+    if spx is not None: snap["S&P 500"] = spx
+    if ndx is not None: snap["Nasdaq 100"] = ndx
+
+    # 1-year history for charts (if you want to show Macro Pulse)
+    try:
+        hist = yf.download(
+            tickers=["^GSPC","^NDX"],
+            period="1y", interval="1d", auto_adjust=True, progress=False
+        )["Close"].rename(columns={"^GSPC":"S&P 500","^NDX":"Nasdaq 100"})
+        hist.index = pd.to_datetime(hist.index, utc=True)
+    except Exception:
+        hist = pd.DataFrame()
+
+    return snap, hist
+
 
 
 # --------- CISA Alerts RSS (no key)
