@@ -146,32 +146,79 @@ _TICKERS = {
     "10Y": "^TNX",  # CBOE 10Y yield index
 }
 
+# src/collectors.py  – replace ONLY this function
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from json import JSONDecodeError
+
 def fetch_market_snapshot():
     """
-    Returns (snap, hist)
-      snap: dict with keys like 'VIX','S&P 500','Nasdaq 100'
-      hist: DataFrame of index closes for simple charts/momentum
-    """
-    snap = {}
-    # ^VIX, ^GSPC (S&P 500), ^NDX (Nasdaq 100)
-    vix = _last_close("^VIX")
-    spx = _last_close("^GSPC")
-    ndx = _last_close("^NDX")
-    if vix is not None: snap["VIX"] = vix
-    if spx is not None: snap["S&P 500"] = spx
-    if ndx is not None: snap["Nasdaq 100"] = ndx
+    Market snapshot for Command Center.
 
-    # 1-year history for charts (if you want to show Macro Pulse)
+    - Uses free Yahoo Finance via yfinance.
+    - Tickers:
+        ^GSPC  -> S&P 500
+        ^NDX   -> Nasdaq 100
+        ^VIX   -> VIX (volatility index)
+    - If Yahoo blocks or misbehaves, we return an empty snapshot +
+      empty history instead of raising.
+    """
+    tickers = ["^GSPC", "^NDX", "^VIX"]
+
     try:
-        hist = yf.download(
-            tickers=["^GSPC","^NDX"],
-            period="1y", interval="1d", auto_adjust=True, progress=False
-        )["Close"].rename(columns={"^GSPC":"S&P 500","^NDX":"Nasdaq 100"})
-        hist.index = pd.to_datetime(hist.index, utc=True)
+        data = yf.download(
+            tickers,
+            period="1mo",        # short history for speed
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            threads=False,
+            progress=False
+        )
+    except JSONDecodeError:
+        # Yahoo returned garbage; fail soft
+        return {}, pd.DataFrame()
     except Exception:
-        hist = pd.DataFrame()
+        # Any network or remote error: just treat as "no market data"
+        return {}, pd.DataFrame()
+
+    snap = {}
+    hist = pd.DataFrame()
+
+    rename = {
+        "^GSPC": "S&P 500",
+        "^NDX": "Nasdaq 100",
+        "^VIX": "VIX"
+    }
+
+    # yfinance sometimes nests columns differently depending on version
+    for t in tickers:
+        try:
+            if t in data.columns:  # flat column case
+                series = data[t].dropna()
+            else:                  # multi-index case: data['^GSPC']['Close']
+                series = data[t]["Close"].dropna()
+        except Exception:
+            continue
+
+        if series.empty:
+            continue
+
+        label = rename[t]
+        hist[label] = series.astype(float)
+        snap[label] = float(series.iloc[-1])
+
+    # Normalise index to UTC datetime if present
+    if not hist.empty:
+        if not isinstance(hist.index, pd.DatetimeIndex):
+            hist.index = pd.to_datetime(hist.index, errors="coerce")
+        if hist.index.tz is None:
+            hist.index = hist.index.tz_localize("UTC")
 
     return snap, hist
+
 
 
 
