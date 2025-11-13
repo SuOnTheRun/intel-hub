@@ -38,7 +38,32 @@ def _section_title(label):
 def render():
     set_dark_theme()
     st.title("United States — Intelligence Command Center")
-    st.caption("Live OSINT | HUMINT | Situational Awareness & Early Warning")
+st.caption(_subtitle_from_signals(
+    tension, vix_val, tsa_df["delta_vs_2019_pct"].iloc[-1] if not tsa_df.empty else float("nan")
+))
+
+
+def _fmt_pct(x):
+    try:
+        if x is None or (isinstance(x, float) and (np.isnan(x) or np.isinf(x))):
+            return "—"
+        return f"{x:.1f}%"
+    except Exception:
+        return "—"
+
+def _subtitle_from_signals(tension, vix_val, tsa_val):
+    bits = []
+    if not (isinstance(tension, float) and np.isnan(tension)):
+        level = "calm" if tension < 40 else "balanced" if tension < 60 else "elevated"
+        bits.append(f"Tension {tension:.1f} ({level})")
+    if isinstance(vix_val, float) and not np.isnan(vix_val):
+        band = "low" if vix_val < 15 else "mid" if vix_val < 22 else "high"
+        bits.append(f"VIX {vix_val:.1f} ({band})")
+    if isinstance(tsa_val, float) and not np.isnan(tsa_val):
+        sign = "above" if tsa_val >= 0 else "below"
+        bits.append(f"Mobility {abs(tsa_val):.1f}% {sign} 2019")
+    return " · ".join(bits) or "Live OSINT | HUMINT | Situational Awareness"
+
 
     # -------- Data pulls (guarded) --------
     try:
@@ -61,14 +86,19 @@ def render():
     except Exception:
         news_df = pd.DataFrame()
 
-    # Compute headline list early
-    headlines = []
-    if not news_df.empty:
-        newest = news_df.head(12).copy()
-        for _, r in newest.iterrows():
-            t = _relative(pd.to_datetime(r["time"]))
-            src = r.get("source","")
-            headlines.append(f"• [{r['title']}]({r['link']})  <span class='small'>— {src} · {t}</span>")
+    # Compute headline list early (render as a bulleted list with breaks)
+headlines_md = ""
+if not news_df.empty:
+    newest = news_df.head(12).copy()
+    lines = []
+    for _, r in newest.iterrows():
+        t = _relative(pd.to_datetime(r["time"]))
+        src = r.get("source","").strip()
+        title = str(r["title"]).replace("[","(").replace("]",")")  # avoid MD link conflicts
+        url = r["link"]
+        lines.append(f"- [{title}]({url}) — *{src} · {t}*")
+    headlines_md = "\n".join(lines)
+
     
     # -------- Top metrics (sparse, minimal) --------
     breakdown = tension_breakdown()
@@ -81,11 +111,14 @@ def render():
         st.metric("National Tension Index", f"{_fmt(tension)}")
         st.markdown("<div class='calc-note'>Percentile-weighted composite of tone, volume, CISA, FEMA, VIX, TSA.</div>", unsafe_allow_html=True)
     with m2:
-        st.metric("VIX (Market Stress)", f"{_fmt(vix_val)}")
-        st.markdown("<div class='calc-note'>Latest ^VIX close (yfinance history).</div>", unsafe_allow_html=True)
+    st.metric("VIX (Market Stress)", f"{_fmt(vix_val)}")
+    st.markdown("<div class='calc-note'>Latest ^VIX close (yfinance history).</div>", unsafe_allow_html=True)
+
     with m3:
-        st.metric("Mobility Δ vs 2019", f"{_fmt(tsa_val)}%")
-        st.markdown("<div class='calc-note'>TSA 7-day avg vs 2019 7-day avg.</div>", unsafe_allow_html=True)
+    tsa_val = tsa_df["delta_vs_2019_pct"].iloc[-1] if not tsa_df.empty else float("nan")
+    st.metric("Mobility Δ vs 2019", _fmt_pct(tsa_val))
+    st.markdown("<div class='calc-note'>TSA 7-day avg vs 2019 7-day avg.</div>", unsafe_allow_html=True)
+
     with m4:
         st.metric("CISA Alerts (3d)", f"{_fmt(inputs.cisa_count_3d)}")
         st.markdown("<div class='calc-note'>Count of advisories past 72h.</div>", unsafe_allow_html=True)
@@ -101,26 +134,52 @@ def render():
     # LEFT — Situation + Headlines (no huge boxes, just clean cards)
     with left:
         st.markdown("<div class='card'>", unsafe_allow_html=True)
-        _section_title("Situation Report")
-        # Build 3–6 concise points from available signals (no placeholders)
-        pts = []
-        comp = breakdown["components"]
-        if comp:
-            if comp["tone"]["risk"] >= 60: pts.append("Narrative tone is **unfavourable** vs its 2-week history.")
-            if comp["vix"]["risk"] >= 60: pts.append("Market stress (**VIX**) is elevated versus its 1-year range.")
-            if comp["tsa"]["risk"] >= 60: pts.append("Mobility is **below** 2019 baseline momentum.")
-            if inputs.cisa_count_3d > 0:  pts.append(f"{inputs.cisa_count_3d} CISA advisories in the past 72h.")
-            if inputs.fema_count_14d > 0: pts.append(f"{inputs.fema_count_14d} FEMA declarations in the past 14d.")
-        if not pts: pts = ["No abnormal signals detected across core indicators in the last 24–72 hours."]
-        for p in pts: st.markdown(f"- {p}")
-        st.markdown("</div>", unsafe_allow_html=True)
+       _section_title("Situation Report")
 
-        if headlines:
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            _section_title("Latest Headlines")
-            st.markdown("\n".join(headlines), unsafe_allow_html=True)
-            st.markdown("<div class='calc-note'>Feed: Google News (US edition). Times are approximate (UTC).</div>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+# Build concise, data-backed points
+pts = []
+comp = breakdown.get("components", {}) if isinstance(breakdown, dict) else {}
+
+# Existing component-driven checks (keep if available)
+if comp:
+    if comp.get("tone", {}).get("risk", 0) >= 60:
+        pts.append("Narrative tone is **unfavourable** vs its 2-week history.")
+    if comp.get("vix", {}).get("risk", 0) >= 60:
+        pts.append("Market stress (**VIX**) is elevated versus its 1-year range.")
+    if comp.get("tsa", {}).get("risk", 0) >= 60:
+        pts.append("Mobility is **below** 2019 baseline momentum.")
+    if inputs.cisa_count_3d > 0:
+        pts.append(f"{inputs.cisa_count_3d} CISA advisories in the past 72h.")
+    if inputs.fema_count_14d > 0:
+        pts.append(f"{inputs.fema_count_14d} FEMA declarations in the past 14d.")
+
+# Always add today's key numbers (explicit, readable)
+if isinstance(vix_val, float) and not np.isnan(vix_val):
+    band = "low" if vix_val < 15 else "mid" if vix_val < 22 else "high"
+    pts.append(f"VIX at **{vix_val:.1f}** ({band} stress).")
+
+tsa_val = tsa_df["delta_vs_2019_pct"].iloc[-1] if not tsa_df.empty else float("nan")
+if isinstance(tsa_val, float) and not np.isnan(tsa_val):
+    sign = "above" if tsa_val >= 0 else "below"
+    pts.append(f"Mobility vs 2019: **{tsa_val:+.1f}%** ({sign}, 7-day avg).")
+
+# Fallback if nothing triggered
+if not pts:
+    pts = ["No abnormal signals detected across core indicators in the last 24–72 hours."]
+
+for p in pts:
+    st.markdown(f"- {p}")
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+
+   if headlines_md:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    _section_title("Latest Headlines")
+    st.markdown(headlines_md, unsafe_allow_html=True)
+    st.markdown("<div class='calc-note'>Feed: Google News (US edition). Times are approximate (UTC).</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
     # RIGHT — Macro & Activity signals (only show if we actually have data)
     with right:
