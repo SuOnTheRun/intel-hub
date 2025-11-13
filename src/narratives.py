@@ -1,76 +1,126 @@
 # src/narratives.py
-# Strategist Playbook (ad-tech oriented, data-driven)
-
-from collections import Counter
+from __future__ import annotations
 import re
 import pandas as pd
-import numpy as np
 
-# very light stoplist for bigram extraction
-_STOP = set("""
-a an and are as at be by for from has have if in into is it its of on or our over
-than that the their there this to via was were will with your you we us about after before
-""".split())
+# very compact keyword map → vertical
+VERTICALS = {
+    "healthcare": [
+        r"flu|covid|measles|whooping cough|meningitis|dengue|hospital|cdc|drug shortage|vaccine|insulin|medicare"
+    ],
+    "travel": [
+        r"tsa|airport|airline|flight|faa|weather alert|snowstorm|blizzard|hurricane|passport|visa"
+    ],
+    "retail": [
+        r"black friday|cyber monday|shopper|mall|foot traffic|store closing|inventory|supply chain|discount|sale"
+    ],
+    "finance": [
+        r"fed|interest rate|inflation|cpi|ppi|treasury|mortgage|bank|earnings|default|credit|housing market"
+    ],
+    "tech": [
+        r"breach|outage|ransomware|vulnerability|cve|ai|chip|semiconductor|app store|privacy|antitrust"
+    ],
+    "auto": [
+        r"ev|recall|dealer|fuel|gas price|auto sales|registration|highway|nhtsa"
+    ],
+}
 
-def _bigrams_from_titles(df: pd.DataFrame, col: str = "title", top: int = 8):
-    """Return top 'top' bigrams from news titles (quick and dependency-free)."""
-    if df is None or df.empty or col not in df:
-        return []
-    def toks(s: str):
-        words = re.findall(r"[A-Za-z][A-Za-z\-]+", (s or "").lower())
-        return [w for w in words if w not in _STOP and len(w) > 2]
-    c = Counter()
-    for t in df[col].astype(str):
-        ws = toks(t)
-        for i in range(len(ws) - 1):
-            w1, w2 = ws[i], ws[i+1]
-            if w1 in _STOP or w2 in _STOP:
-                continue
-            c[f"{w1} {w2}"] += 1
-    return [w for w, _ in c.most_common(top)]
+US_STATES = {
+    # simple state detector from headline text (name or postal)
+    "AL":"alabama","AK":"alaska","AZ":"arizona","AR":"arkansas","CA":"california","CO":"colorado","CT":"connecticut",
+    "DE":"delaware","FL":"florida","GA":"georgia","HI":"hawaii","ID":"idaho","IL":"illinois","IN":"indiana","IA":"iowa",
+    "KS":"kansas","KY":"kentucky","LA":"louisiana","ME":"maine","MD":"maryland","MA":"massachusetts","MI":"michigan",
+    "MN":"minnesota","MS":"mississippi","MO":"missouri","MT":"montana","NE":"nebraska","NV":"nevada","NH":"new hampshire",
+    "NJ":"new jersey","NM":"new mexico","NY":"new york","NC":"north carolina","ND":"north dakota","OH":"ohio","OK":"oklahoma",
+    "OR":"oregon","PA":"pennsylvania","RI":"rhode island","SC":"south carolina","SD":"south dakota","TN":"tennessee",
+    "TX":"texas","UT":"utah","VT":"vermont","VA":"virginia","WA":"washington","WV":"west virginia","WI":"wisconsin","WY":"wyoming",
+    "DC":"district of columbia"
+}
 
-def strategist_playbook(breakdown: dict, market_hist: pd.DataFrame,
-                        tsa_df: pd.DataFrame, news_df: pd.DataFrame):
-    """
-    Build an ad-tech strategist’s short playbook from live signals.
-    Returns: {"marketing": [...], "insight": [...], "topics": [...]}
-    """
-    comp = breakdown.get("components", {})
-    out_mkt, out_ins, out_topics = [], [], []
+def _match_any(text: str, patterns: list[str]) -> bool:
+    t = text.lower()
+    return any(re.search(p, t) for p in patterns)
 
-    # --- Marketing posture (budget/flight/creative guardrails)
-    if comp:
-        if comp.get("vix", {}).get("risk", 0) >= 60:
-            out_mkt.append("Keep budgets flexible; shorter flights & faster optimisation while VIX is elevated.")
-        if comp.get("tone", {}).get("risk", 0) >= 60:
-            out_mkt.append("Tighten brand-safety and context filters on hard-news inventory.")
-        if comp.get("tsa", {}).get("risk", 0) >= 60:
-            out_mkt.append("De-emphasise travel-moment creatives; lean into at-home/comparison shopping intents.")
-        if comp.get("volume", {}).get("risk", 0) >= 60:
-            out_mkt.append("Expect pricier premium news inventory (coverage surge); pre-book only if context aligns.")
+def _states_from_title(title: str) -> list[str]:
+    t = title.lower()
+    hits = []
+    for abbr, name in US_STATES.items():
+        if re.search(rf"\b{abbr.lower()}\b", t) or re.search(rf"\b{name}\b", t):
+            hits.append(abbr)
+    return hits
 
-    if market_hist is not None and not market_hist.empty:
-        from .risk_model import market_momentum
-        mom = market_momentum(market_hist)
-        if mom.get("Nasdaq 100", 0) > 0 and mom.get("S&P 500", 0) > 0:
-            out_mkt.append("Tech & broad-market momentum positive; test performance formats with tighter ROAS targets.")
-        if mom.get("Nasdaq 100", 0) < 0:
-            out_mkt.append("Tech momentum cooling; rotate creative to value/utility messages.")
+def _top_topics_by_state(news_df: pd.DataFrame, top_k: int = 5) -> dict[str, list[str]]:
+    if news_df is None or news_df.empty: return {}
+    buckets: dict[str, dict[str,int]] = {}
+    for _, r in news_df.iterrows():
+        title = str(r.get("title",""))
+        states = _states_from_title(title)
+        if not states: continue
+        # quick keyword tokens
+        words = [w for w in re.findall(r"[a-zA-Z]{4,}", title.lower()) if w not in {"with","from","that","this","have","will"}]
+        if not words: continue
+        for st in states:
+            buckets.setdefault(st, {})
+            for w in words:
+                buckets[st][w] = buckets[st].get(w, 0) + 1
+    out = {}
+    for st, bag in buckets.items():
+        ranked = sorted(bag.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        out[st] = [w for w,_ in ranked]
+    return out
 
-    # --- Insight watchlist (what to track / expect)
-    if comp.get("cisa", {}).get("risk", 0) >= 60:
-        out_ins.append("Monitor CISA hourly for vendor/library CVEs affecting fintech/retail apps.")
-    if comp.get("fema", {}).get("risk", 0) >= 60:
-        out_ins.append("Overlay FEMA regions on retail campaigns to anticipate supply/footfall shocks.")
-    if tsa_df is not None and not tsa_df.empty:
-        latest = float(tsa_df["delta_vs_2019_pct"].dropna().iloc[-1])
-        if latest < -5:
-            out_ins.append(f"Travel intent trails 2019 by {latest:.1f}% — reduce airport-adjacent audience reliance.")
-    out_ins.append(f"Tension Index {breakdown.get('index','—')} — weighted percentiles of Tone/Volume/CISA/FEMA/VIX/TSA.")
+def strategist_playbook(breakdown, market_hist, tsa_df, news_df):
+    """Return dict with marketing posture, insight watchlist, topical signals, and per-state topics."""
+    marketing, insight, topics = [], [], []
 
-    # --- Emerging topics from headlines (top bigrams)
-    topics = _bigrams_from_titles(news_df, "title", top=8)
-    if topics:
-        out_topics = [f"• {t}" for t in topics[:8]]
+    # 1) Headline-driven tactical prompts by vertical
+    if news_df is not None and not news_df.empty:
+        titles = " ".join(news_df["title"].astype(str).tolist())
+        for vert, pats in VERTICALS.items():
+            if _match_any(titles, pats):
+                if vert == "healthcare":
+                    marketing.append("Activate **Healthcare** & **Pharma** audiences; test prevention & care messaging.")
+                    insight.append("Monitor disease-topic velocity; align geo tactics near hospitals & clinics.")
+                if vert == "travel":
+                    marketing.append("Increase **Travel** intent targeting; sync bids to airport/TSA cadence.")
+                    insight.append("Use weather-driven triggers for flight-disruption creatives in affected states.")
+                if vert == "retail":
+                    marketing.append("Lean into **Retail** deal creatives; day-part around shopping windows.")
+                    insight.append("Track footfall deltas for malls; pivot to value messaging where inflation spikes.")
+                if vert == "finance":
+                    marketing.append("For **Finance**, foreground stability/returns; avoid risk-heavy creative during volatility.")
+                    insight.append("Use VIX regime to adjust frequency caps; tighten brand-safety lists on earnings days.")
+                if vert == "tech":
+                    marketing.append("For **Tech**, reinforce privacy & reliability; steer away from outage-adjacent content.")
+                    insight.append("Set alerts on ‘breach/outage’ terms; auto-pause sensitive placements.")
+                if vert == "auto":
+                    marketing.append("For **Auto**, retarget EV/ICE intent by fuel and rate headlines; test financing CTAs.")
+                    insight.append("Layer gas-price proxies and DMV/registration signals if available.")
 
-    return {"marketing": out_mkt, "insight": out_ins, "topics": out_topics}
+        # Emerging topics list (nationwide)
+        for _, r in news_df.head(12).iterrows():
+            topics.append("- " + " · ".join([
+                str(r.get("title","")).strip()[:120],
+                str(r.get("source","")).strip()
+            ]))
+
+    # 2) Regime hints from market/mobility
+    try:
+        last_vix = float(breakdown.get("components", {}).get("vix", {}).get("value", float("nan")))
+    except Exception:
+        last_vix = float("nan")
+    if not pd.isna(last_vix):
+        if last_vix >= 22:
+            marketing.append("Shift tone **reassuring/credible**; prioritize top-of-funnel where confidence is shaky.")
+        elif last_vix <= 15:
+            marketing.append("Lean **bolder/product-led** creative; broaden prospecting where confidence is stable.")
+
+    # 3) Per-state topic extraction for the UI (simple keywords per state)
+    topics_by_state = _top_topics_by_state(news_df)
+
+    return {
+        "marketing": marketing[:6],
+        "insight": insight[:6],
+        "topics": topics,
+        "topics_by_state": topics_by_state
+    }
