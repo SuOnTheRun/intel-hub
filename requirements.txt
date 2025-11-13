@@ -19,3 +19,5 @@ fredapi==0.5.2
 # spaCy model wheel is OK to install, but we do not import spaCy at runtime
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 requests-cache==1.2.1
+textblob
+
