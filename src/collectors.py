@@ -153,6 +153,13 @@ import numpy as np
 import yfinance as yf
 from json import JSONDecodeError
 
+# src/collectors.py  – replace ONLY this function
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from json import JSONDecodeError
+
 def fetch_market_snapshot():
     """
     Market snapshot for Command Center.
@@ -218,8 +225,6 @@ def fetch_market_snapshot():
             hist.index = hist.index.tz_localize("UTC")
 
     return snap, hist
-
-
 
 
 # --------- CISA Alerts RSS (no key)
