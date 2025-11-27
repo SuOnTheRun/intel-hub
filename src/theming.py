@@ -2,36 +2,33 @@
 from __future__ import annotations
 import streamlit as st
 
-
 def _apply_white_lux_theme() -> None:
     """
-    Core 'white luxury control hub' theme.
-    Shared by both set_dark_theme() and set_light_theme() so
-    existing imports keep working.
+    Core 'white luxury control hub' theme for both pages.
     """
     st.set_page_config(
-        page_title="Blis Intelligence Hub — US",
+        page_title="Blis Intelligence Hub",
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
     css = """
     <style>
-    /* ---------- Base layout ---------- */
+
+    /* ---------- Base app ---------- */
     .stApp {
-        background: #f5f5f7;  /* soft off-white */
+        background: #f5f5f7;
         color: #111827;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-                     "Segoe UI", sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     }
 
     .main .block-container {
         max-width: 1400px;
-        padding-top: 2rem;
-        padding-bottom: 3rem;
+        padding-top: 2rem !important;
+        padding-bottom: 3rem !important;
     }
 
-    /* ---------- Sidebar / navigation ---------- */
+    /* ---------- Sidebar ---------- */
     section[data-testid="stSidebar"] {
         background: #f3f4f6;
         border-right: 1px solid #e5e7eb;
@@ -39,39 +36,36 @@ def _apply_white_lux_theme() -> None:
 
     section[data-testid="stSidebar"] .css-1d391kg,
     section[data-testid="stSidebar"] .block-container {
-        padding-top: 1.5rem;
+        padding-top: 1.5rem !important;
     }
 
     section[data-testid="stSidebar"] h2,
     section[data-testid="stSidebar"] h3 {
-        font-size: 0.9rem;
+        font-size: 0.9rem !important;
         text-transform: uppercase;
         letter-spacing: .12em;
-        color: #6b7280;
-        font-weight: 600;
+        color: #6b7280 !important;
+        font-weight: 600 !important;
     }
 
     /* ---------- Typography ---------- */
     h1 {
         font-size: 1.9rem !important;
-        letter-spacing: .03em;
+        letter-spacing: .02em;
         font-weight: 650 !important;
+        margin-bottom: 0.4rem !important;
         color: #111827;
-        margin-bottom: 0.4rem;
     }
 
-    .section-title {
-        font-size: 0.95rem;
+    h3.section-title {
+        background: transparent !important;
+        padding: 0 !important;
+        margin-top: 0.5rem !important;
+        font-size: 0.95rem !important;
         text-transform: uppercase;
         letter-spacing: .11em;
-        color: #4b5563;
-        font-weight: 600;
-        margin: 0 0 0.35rem 0;
-    }
-
-    .small {
-        font-size: 0.78rem;
-        color: #6b7280;
+        color: #4b5563 !important;
+        font-weight: 600 !important;
     }
 
     .calc-note {
@@ -80,84 +74,51 @@ def _apply_white_lux_theme() -> None:
         margin-top: 0.15rem;
     }
 
-    /* remove odd grey "header boxes" */
-    h3 {
-        background: transparent !important;
-        padding: 0 !important;
-        margin-top: 0.5rem;
+    .small {
+        font-size: 0.78rem;
+        color: #6b7280;
     }
 
-    /* ---------- Cards & panels ---------- */
-    .card,
-    .chart-card,
-    .note-card {
-        background: #ffffff;
-        border-radius: 16px;
-        border: 1px solid #e5e7eb;
+    /* ---------- Cards ---------- */
+    .card, .chart-card, .note-card {
+        background: #ffffff !important;
+        border-radius: 16px !important;
+        border: 1px solid #e5e7eb !important;
+        padding: 1rem 1.25rem !important;
+        margin-top: 0.75rem !important;
         box-shadow:
             0 18px 45px rgba(15, 23, 42, 0.04),
             0 0 1px rgba(15, 23, 42, 0.08);
-        padding: 1rem 1.25rem;
-        margin-top: 0.75rem;
     }
 
     .chart-card {
-        padding-top: 0.9rem;
-        padding-bottom: 0.9rem;
+        padding: 0.9rem !important;
     }
 
-    .note-card {
-        padding-top: 0.7rem;
-        padding-bottom: 0.7rem;
-    }
-
-    .card ul {
-        padding-left: 1.1rem;
-        margin-bottom: 0.2rem;
-    }
-
-    .card li {
-        margin-bottom: 0.12rem;
-        line-height: 1.35;
-        font-size: 0.9rem;
-    }
-
-    /* ---------- Metrics row ---------- */
+    /* ---------- Metric boxes ---------- */
     [data-testid="stMetric"] {
-        background: #ffffff;
-        border-radius: 14px;
-        border: 1px solid #e5e7eb;
-        padding: 0.65rem 0.75rem;
+        background: #ffffff !important;
+        border-radius: 14px !important;
+        border: 1px solid #e5e7eb !important;
+        padding: 0.65rem 0.75rem !important;
         box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
     }
 
     [data-testid="stMetric"] label {
-        font-size: 0.8rem;
+        font-size: 0.8rem !important;
+        font-weight: 600 !important;
         text-transform: uppercase;
+        color: #6b7280 !important;
         letter-spacing: .14em;
-        color: #6b7280;
-        font-weight: 600;
     }
 
-    [data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 1.3rem;
-        font-weight: 650;
-        color: #111827;
-    }
-
-    [data-testid="stMetricDelta"] {
-        font-size: 0.8rem;
-    }
-
-    [data-testid="stMetricDelta"] span {
-        color: #059669;
+    [data-testid="stMetricValue"] {
+        font-size: 1.3rem !important;
+        font-weight: 650 !important;
+        color: #111827 !important;
     }
 
     /* ---------- Tables ---------- */
-    .note-card [data-testid="stDataFrame"] {
-        font-size: 0.8rem;
-    }
-
     .note-card table {
         border-radius: 10px;
         overflow: hidden;
@@ -171,44 +132,20 @@ def _apply_white_lux_theme() -> None:
         background: #f9fafb;
     }
 
-    /* ---------- Charts ---------- */
-    .chart-card [data-testid="stPlotlyChart"],
-    .chart-card [data-testid="stAltairChart"],
-    .chart-card canvas {
-        background: #ffffff !important;
-    }
-
-    /* ---------- Links & bullets ---------- */
+    /* ---------- Links ---------- */
     a {
         color: #1f2937;
-        text-decoration: none;
         border-bottom: 1px dotted rgba(31,41,55,0.45);
+        text-decoration: none;
     }
 
     a:hover {
-        color: #111827;
         border-bottom-style: solid;
-    }
-
-    .card ul li a {
-        font-size: 0.9rem;
-    }
-
-    /* ---------- Strategist Playbook ---------- */
-    .card strong {
-        font-weight: 600;
         color: #111827;
     }
 
-    .card.playbook {
-        background: #fff7f7;
-    }
+    footer { visibility: hidden; height: 0; }
 
-    /* ---------- Misc ---------- */
-    footer, .reportview-container .main footer {
-        visibility: hidden;
-        height: 0;
-    }
     </style>
     """
 
@@ -216,15 +153,10 @@ def _apply_white_lux_theme() -> None:
 
 
 def set_dark_theme() -> None:
-    """
-    Backwards-compatible entry point used by the US Command Center.
-    """
+    """Used by the US Command Center page."""
     _apply_white_lux_theme()
 
 
 def set_light_theme() -> None:
-    """
-    Backwards-compatible entry point used by Markets & Macro page.
-    For now it shares the same 'white luxury' styling.
-    """
+    """Used by the Markets & Macro page — same theme for now."""
     _apply_white_lux_theme()
