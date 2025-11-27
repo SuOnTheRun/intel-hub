@@ -1,3 +1,14 @@
+# MUST COME FIRST
+import streamlit as st
+st.set_page_config(
+    page_title="US — Intelligence Command Center",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+from theming import apply_white_lux_theme
+apply_white_lux_theme()
+
 # src/ui_us.py
 from __future__ import annotations
 
