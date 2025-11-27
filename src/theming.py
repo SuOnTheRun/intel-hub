@@ -3,12 +3,11 @@ from __future__ import annotations
 import streamlit as st
 
 
-def set_dark_theme() -> None:
+def _apply_white_lux_theme() -> None:
     """
-    Global 'white luxury control hub' theme.
-
-    Note: function name kept as set_dark_theme() so other modules
-    don't need to change their imports.
+    Core 'white luxury control hub' theme.
+    Shared by both set_dark_theme() and set_light_theme() so
+    existing imports keep working.
     """
     st.set_page_config(
         page_title="Blis Intelligence Hub — US",
@@ -26,7 +25,6 @@ def set_dark_theme() -> None:
                      "Segoe UI", sans-serif;
     }
 
-    /* widen main content */
     .main .block-container {
         max-width: 1400px;
         padding-top: 2rem;
@@ -39,12 +37,12 @@ def set_dark_theme() -> None:
         border-right: 1px solid #e5e7eb;
     }
 
-    section[data-testid="stSidebar"] .css-1d391kg,  /* older streamlit */
+    section[data-testid="stSidebar"] .css-1d391kg,
     section[data-testid="stSidebar"] .block-container {
         padding-top: 1.5rem;
     }
 
-    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h2,
     section[data-testid="stSidebar"] h3 {
         font-size: 0.9rem;
         text-transform: uppercase;
@@ -151,7 +149,6 @@ def set_dark_theme() -> None:
         font-size: 0.8rem;
     }
 
-    /* accent for positive signals (subtle mint) */
     [data-testid="stMetricDelta"] span {
         color: #059669;
     }
@@ -175,7 +172,6 @@ def set_dark_theme() -> None:
     }
 
     /* ---------- Charts ---------- */
-    /* give charts a clean white card-style background */
     .chart-card [data-testid="stPlotlyChart"],
     .chart-card [data-testid="stAltairChart"],
     .chart-card canvas {
@@ -194,7 +190,6 @@ def set_dark_theme() -> None:
         border-bottom-style: solid;
     }
 
-    /* headline bullets tighter */
     .card ul li a {
         font-size: 0.9rem;
     }
@@ -205,8 +200,6 @@ def set_dark_theme() -> None:
         color: #111827;
     }
 
-    /* subtle blush tint only for PLAYBOOK background if you want it differentiated
-       (comment the next rule out if you prefer pure white) */
     .card.playbook {
         background: #fff7f7;
     }
@@ -220,3 +213,18 @@ def set_dark_theme() -> None:
     """
 
     st.markdown(css, unsafe_allow_html=True)
+
+
+def set_dark_theme() -> None:
+    """
+    Backwards-compatible entry point used by the US Command Center.
+    """
+    _apply_white_lux_theme()
+
+
+def set_light_theme() -> None:
+    """
+    Backwards-compatible entry point used by Markets & Macro page.
+    For now it shares the same 'white luxury' styling.
+    """
+    _apply_white_lux_theme()
